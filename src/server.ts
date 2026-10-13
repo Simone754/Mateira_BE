@@ -8,12 +8,31 @@ server.listen(PORT, () => {
   console.log(`API running on http://localhost:${PORT}`);
 });
 
-process.on("SIGINT", shutdown);
-process.on("SIGTERM", shutdown);
+let shuttingDown = false;
 
-async function shutdown() {
-  server.close();
-  await prisma.$disconnect();
-  await pool.end();
-  process.exit(0);
+async function shutdown(signal: string): Promise<void> {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  console.log(`${signal} received, shutting down`);
+
+  const force = setTimeout(() => {
+    console.error("Forced shutdown after timeout");
+    process.exit(1);
+  }, 10_000);
+  force.unref();
+
+  try {
+    await new Promise<void>((resolve, reject) => {
+      server.close((err) => (err ? reject(err) : resolve()));
+    });
+    await prisma.$disconnect();
+    await pool.end();
+    process.exit(0);
+  } catch (err) {
+    console.error(err);
+    process.exit(1);
+  }
 }
+
+process.on("SIGINT", () => void shutdown("SIGINT"));
+process.on("SIGTERM", () => void shutdown("SIGTERM"));
