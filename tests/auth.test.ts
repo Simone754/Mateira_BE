@@ -132,6 +132,86 @@ test("ensureSuperuser is idempotent and enforces a password length", async () =>
   await ensureSuperuser(ADMIN_EMAIL, "another-long-password");
   assert.equal(await prisma.user.count(), 1);
 
+  const oldLogin = await request("POST", "/api/admin/auth/login", { body: { email: ADMIN_EMAIL, password: ADMIN_PASSWORD } });
+  assert.equal(oldLogin.status, 401, "the replaced password must stop working");
+  const newLogin = await request("POST", "/api/admin/auth/login", { body: { email: ADMIN_EMAIL, password: "another-long-password" } });
+  assert.equal(newLogin.status, 200);
+
   await assert.rejects(() => ensureSuperuser(ADMIN_EMAIL, "short"), (e: any) => e.status === 400);
   await assert.rejects(() => ensureSuperuser("not-an-email", ADMIN_PASSWORD), (e: any) => e.status === 400);
+  await assert.rejects(() => ensureSuperuser(ADMIN_EMAIL, " ".repeat(10) + "ab"), (e: any) => e.status === 400);
+});
+
+test("re-seeding with the same password keeps existing sessions", async () => {
+  const { cookie } = await loginAsAdmin(request);
+
+  await ensureSuperuser(ADMIN_EMAIL, ADMIN_PASSWORD);
+
+  const refreshed = await request("POST", "/api/admin/auth/refresh", { cookie });
+  assert.equal(refreshed.status, 200);
+});
+
+test("re-seeding with a different password revokes existing sessions", async () => {
+  const { cookie } = await loginAsAdmin(request);
+
+  await ensureSuperuser(ADMIN_EMAIL, "another-long-password");
+
+  const refreshed = await request("POST", "/api/admin/auth/refresh", { cookie });
+  assert.equal(refreshed.status, 401);
+});
+
+test("the password is used exactly as typed, whitespace included", async () => {
+  const password = "correct-horse-battery\n";
+  await ensureSuperuser(ADMIN_EMAIL, password);
+
+  const without = await request("POST", "/api/admin/auth/login", { body: { email: ADMIN_EMAIL, password: password.trim() } });
+  assert.equal(without.status, 401);
+
+  const exact = await request("POST", "/api/admin/auth/login", { body: { email: ADMIN_EMAIL, password } });
+  assert.equal(exact.status, 200);
+});
+
+test("login rejects a missing, empty or non-string password with 400", async () => {
+  for (const password of [undefined, "", 12345]) {
+    const res = await request("POST", "/api/admin/auth/login", { body: { email: ADMIN_EMAIL, password } });
+    assert.equal(res.status, 400);
+  }
+});
+
+test("parallel failed logins cannot get past the rate limit", async () => {
+  await ensureSuperuser(ADMIN_EMAIL, ADMIN_PASSWORD);
+  const bad = { email: ADMIN_EMAIL, password: "wrong-password" };
+
+  const results = await Promise.all(
+    Array.from({ length: 10 }, () => request("POST", "/api/admin/auth/login", { body: bad })),
+  );
+
+  assert.equal(results.filter((r) => r.status === 401).length, 3);
+  assert.equal(results.filter((r) => r.status === 429).length, 7);
+});
+
+test("successful logins do not use up the per-IP login budget", async () => {
+  await ensureSuperuser(ADMIN_EMAIL, ADMIN_PASSWORD);
+  const good = { email: ADMIN_EMAIL, password: ADMIN_PASSWORD };
+
+  // the per-IP limit is LOGIN_RATE_MAX * 4 = 12
+  for (let i = 0; i < 15; i++) {
+    assert.equal((await request("POST", "/api/admin/auth/login", { body: good })).status, 200);
+  }
+});
+
+test("concurrent reuse of one refresh token has a single winner and revokes the chain", async () => {
+  const { cookie } = await loginAsAdmin(request);
+
+  const results = await Promise.all(
+    Array.from({ length: 5 }, () => request("POST", "/api/admin/auth/refresh", { cookie })),
+  );
+
+  const winners = results.filter((r) => r.status === 200);
+  assert.equal(winners.length, 1);
+  assert.equal(results.filter((r) => r.status === 401).length, 4);
+
+  const winnerCookie = refreshPair(winners[0].setCookie);
+  const afterTheft = await request("POST", "/api/admin/auth/refresh", { cookie: winnerCookie });
+  assert.equal(afterTheft.status, 401, "the winner's new token must be revoked with the rest of the chain");
 });

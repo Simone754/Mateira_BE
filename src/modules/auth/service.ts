@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 
 import bcrypt from "bcryptjs";
-import type { User } from "@prisma/client";
+import type { Prisma, User } from "@prisma/client";
 
 import { BCRYPT_SALT_ROUNDS, REFRESH_TOKEN_TTL } from "../../config/settings";
 import { httpError } from "../../lib/httpErrors";
@@ -34,9 +34,9 @@ export function hashToken(token: string): string {
   return crypto.createHash("sha256").update(token).digest("hex");
 }
 
-export async function issueRefreshToken(userId: string): Promise<string> {
+export async function issueRefreshToken(userId: string, db: Prisma.TransactionClient = prisma): Promise<string> {
   const token = crypto.randomBytes(32).toString("base64url");
-  await prisma.refreshToken.create({
+  await db.refreshToken.create({
     data: {
       userId,
       tokenHash: hashToken(token),
@@ -48,6 +48,13 @@ export async function issueRefreshToken(userId: string): Promise<string> {
 
 export type RotateResult = { ok: true; userId: string; token: string } | { ok: false };
 
+async function revokeAllRefreshTokens(userId: string): Promise<void> {
+  await prisma.refreshToken.updateMany({
+    where: { userId, revokedAt: null },
+    data: { revokedAt: new Date() },
+  });
+}
+
 /**
  * Single-use refresh tokens. Presenting an already-used token means it leaked:
  * every token of that user is revoked.
@@ -57,22 +64,29 @@ export async function rotateRefreshToken(token: string): Promise<RotateResult> {
   if (!row) return { ok: false };
 
   if (row.revokedAt) {
-    await prisma.refreshToken.updateMany({
-      where: { userId: row.userId, revokedAt: null },
-      data: { revokedAt: new Date() },
-    });
+    await revokeAllRefreshTokens(row.userId);
     return { ok: false };
   }
 
   if (row.expiresAt.getTime() <= Date.now()) return { ok: false };
 
-  const claimed = await prisma.refreshToken.updateMany({
-    where: { id: row.id, revokedAt: null },
-    data: { revokedAt: new Date() },
+  // Claim the old token and create the new one atomically: a request that loses the race waits for the
+  // winner to commit, matches nothing, and then revokes the whole chain, winner's new token included.
+  const newToken = await prisma.$transaction(async (tx) => {
+    const claimed = await tx.refreshToken.updateMany({
+      where: { id: row.id, revokedAt: null },
+      data: { revokedAt: new Date() },
+    });
+    if (claimed.count !== 1) return null;
+    return issueRefreshToken(row.userId, tx);
   });
-  if (claimed.count !== 1) return { ok: false };
 
-  return { ok: true, userId: row.userId, token: await issueRefreshToken(row.userId) };
+  if (newToken === null) {
+    await revokeAllRefreshTokens(row.userId);
+    return { ok: false };
+  }
+
+  return { ok: true, userId: row.userId, token: newToken };
 }
 
 export async function revokeRefreshToken(token: string): Promise<void> {
@@ -89,14 +103,27 @@ export function serializeUser(user: User): AuthUser {
 export async function ensureSuperuser(email: string, password: string): Promise<User> {
   const normalized = normalizeEmail(email);
   if (!normalized.includes("@")) throw httpError(400, "email is not valid");
-  if (password.length < PASSWORD_MIN_LENGTH) {
+  if (password.trim().length < PASSWORD_MIN_LENGTH) {
     throw httpError(400, `password must be at least ${PASSWORD_MIN_LENGTH} characters`);
   }
 
-  const passwordHash = await hashPassword(password);
-  return prisma.user.upsert({
-    where: { email: normalized },
-    create: { email: normalized, passwordHash, role: "SUPERUSER" },
-    update: { passwordHash },
-  });
+  const existing = await prisma.user.findUnique({ where: { email: normalized } });
+  if (!existing) {
+    return prisma.user.create({
+      data: { email: normalized, passwordHash: await hashPassword(password), role: "SUPERUSER" },
+    });
+  }
+
+  // Re-running the seed with the same password changes nothing and keeps sessions alive.
+  if (await verifyPassword(password, existing.passwordHash)) return existing;
+
+  // A new password ends every session opened with the old one.
+  const [updated] = await prisma.$transaction([
+    prisma.user.update({ where: { id: existing.id }, data: { passwordHash: await hashPassword(password) } }),
+    prisma.refreshToken.updateMany({
+      where: { userId: existing.id, revokedAt: null },
+      data: { revokedAt: new Date() },
+    }),
+  ]);
+  return updated;
 }

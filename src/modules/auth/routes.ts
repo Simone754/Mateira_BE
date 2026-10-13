@@ -21,6 +21,7 @@ import {
   tooManyRequests,
   unauthorized,
 } from "../../lib/http";
+import { httpError } from "../../lib/httpErrors";
 import { createRateLimiter } from "../../lib/rateLimit";
 import { asObject, reqString } from "../../lib/validate";
 import { requireAdmin } from "../../middlewares/requireAdmin";
@@ -76,7 +77,11 @@ export async function handleAuth(req: IncomingMessage, res: ServerResponse, path
   if (req.method === "POST" && pathname === "/api/admin/auth/login") {
     const body = asObject(await readJson(req));
     const email = normalizeEmail(reqString(body, "email", 254));
-    const password = reqString(body, "password", 200);
+    // The password is used exactly as sent: the seed hashes it untrimmed, so trimming here would lock such a password out.
+    const password = body.password;
+    if (typeof password !== "string" || password.length === 0 || password.length > 200) {
+      throw httpError(400, "password is required");
+    }
 
     const ip = clientIp(req, TRUST_PROXY);
     const accountKey = `${ip}|${email}`;
@@ -85,6 +90,10 @@ export async function handleAuth(req: IncomingMessage, res: ServerResponse, path
       tooManyRequests(res, blocked.retryAfterSec);
       return true;
     }
+    // Count the attempt before the slow lookup: check and hit must not be separated by an await,
+    // otherwise parallel requests all pass the check.
+    loginByAccount.hit(accountKey);
+    loginByIp.hit(ip);
 
     const user = await prisma.user.findUnique({ where: { email } });
     let valid = false;
@@ -92,13 +101,12 @@ export async function handleAuth(req: IncomingMessage, res: ServerResponse, path
     else await burnPasswordCheck(password);
 
     if (!user || !valid) {
-      loginByAccount.hit(accountKey);
-      loginByIp.hit(ip);
       unauthorized(res, "Invalid credentials");
       return true;
     }
 
     loginByAccount.reset(accountKey);
+    loginByIp.release(ip);
     setCookie(res, refreshCookie(await issueRefreshToken(user.id)));
     json(res, 200, accessResponse(user));
     return true;

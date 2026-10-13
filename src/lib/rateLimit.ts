@@ -3,6 +3,8 @@ export type RateLimitState = { allowed: boolean; retryAfterSec: number };
 export type RateLimiter = {
   check(key: string): RateLimitState;
   hit(key: string): void;
+  /** Removes the most recent hit of a key, e.g. to give back a hit that turned out not to count. */
+  release(key: string): void;
   reset(key: string): void;
   clear(): void;
 };
@@ -34,6 +36,12 @@ export function createRateLimiter(options: {
       const list = recent(key);
       list.push(now());
       hits.set(key, list);
+    },
+    release(key) {
+      const list = recent(key);
+      list.pop();
+      if (list.length) hits.set(key, list);
+      else hits.delete(key);
     },
     reset(key) {
       hits.delete(key);
