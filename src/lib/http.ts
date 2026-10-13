@@ -101,12 +101,39 @@ export function setCookie(res: ServerResponse, cookie: string): void {
   res.setHeader("Set-Cookie", [...list, cookie]);
 }
 
-/** When trustProxy is true the first X-Forwarded-For entry is used, which is only safe if the proxy overwrites the header instead of appending to it. */
-export function clientIp(req: IncomingMessage, trustProxy: boolean): string {
-  if (trustProxy) {
-    const header = req.headers["x-forwarded-for"];
-    const first = (Array.isArray(header) ? header[0] : header)?.split(",")[0]?.trim();
-    if (first) return first;
-  }
-  return req.socket.remoteAddress || "unknown";
+const IPV4_WITH_PORT = /^(\d{1,3}(?:\.\d{1,3}){3}):\d+$/;
+const IPV4_MAPPED = /^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/i;
+const BRACKETED_IPV6 = /^\[([^\]]*)\](?::\d+)?$/;
+
+/** Strips the port, the IPv6 brackets and the IPv4-mapped prefix, so the same client always gets the same key. */
+function normalizeIp(value: string): string {
+  let ip = value.trim();
+  const bracketed = BRACKETED_IPV6.exec(ip);
+  if (bracketed) ip = bracketed[1];
+  else ip = IPV4_WITH_PORT.exec(ip)?.[1] ?? ip;
+  return IPV4_MAPPED.exec(ip)?.[1] ?? ip;
+}
+
+/**
+ * Returns the address of the client.
+ *
+ * With `hops` at 0 (no proxy in front of the app) the socket address is used and X-Forwarded-For is ignored,
+ * because any client can send that header. With `hops` = N the app sits behind N trusted proxies, and each one
+ * appends the address it received the request from. The client is therefore the Nth entry from the right, the
+ * address added by the outermost trusted proxy; entries further left were supplied by the client and can be
+ * spoofed. All values of a repeated header are read. With fewer than N entries the request did not go through
+ * the proxies, so the socket address is used.
+ */
+export function clientIp(req: IncomingMessage, hops: number): string {
+  const socketAddress = req.socket.remoteAddress || "unknown";
+  if (hops <= 0) return socketAddress;
+
+  const header = req.headers["x-forwarded-for"];
+  const entries = (Array.isArray(header) ? header.join(",") : (header ?? ""))
+    .split(",")
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+  if (entries.length < hops) return socketAddress;
+
+  return normalizeIp(entries[entries.length - hops]) || "unknown";
 }

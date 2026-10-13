@@ -8,7 +8,7 @@ import {
   LOGIN_RATE_MAX,
   LOGIN_RATE_WINDOW,
   REFRESH_TOKEN_TTL,
-  TRUST_PROXY,
+  TRUST_PROXY_HOPS,
 } from "../../config/settings";
 import {
   clientIp,
@@ -83,7 +83,7 @@ export async function handleAuth(req: IncomingMessage, res: ServerResponse, path
       throw httpError(400, "password is required");
     }
 
-    const ip = clientIp(req, TRUST_PROXY);
+    const ip = clientIp(req, TRUST_PROXY_HOPS);
     const accountKey = `${ip}|${email}`;
     const blocked = [loginByAccount.check(accountKey), loginByIp.check(ip)].find((state) => !state.allowed);
     if (blocked) {

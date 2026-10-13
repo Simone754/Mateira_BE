@@ -7,15 +7,21 @@ export type RateLimiter = {
   release(key: string): void;
   reset(key: string): void;
   clear(): void;
+  /** Number of keys currently tracked, expired ones that have not been swept yet included. */
+  size(): number;
 };
 
 export function createRateLimiter(options: {
   windowMs: number;
   max: number;
   now?: () => number;
+  /** Every this many calls to hit() the whole map is swept for expired keys. Defaults to 1000. */
+  sweepEvery?: number;
 }): RateLimiter {
   const now = options.now ?? Date.now;
+  const sweepEvery = Math.max(1, Math.floor(options.sweepEvery ?? 1000));
   const hits = new Map<string, number[]>();
+  let hitCount = 0;
 
   function recent(key: string): number[] {
     const cutoff = now() - options.windowMs;
@@ -23,6 +29,14 @@ export function createRateLimiter(options: {
     if (list.length) hits.set(key, list);
     else hits.delete(key);
     return list;
+  }
+
+  // Keys that are never touched again would stay in the map forever: drop every key whose hits are all expired.
+  function sweep(): void {
+    const cutoff = now() - options.windowMs;
+    for (const [key, list] of hits) {
+      if (!list.some((t) => t > cutoff)) hits.delete(key);
+    }
   }
 
   return {
@@ -36,6 +50,7 @@ export function createRateLimiter(options: {
       const list = recent(key);
       list.push(now());
       hits.set(key, list);
+      if (++hitCount % sweepEvery === 0) sweep();
     },
     release(key) {
       const list = recent(key);
@@ -48,6 +63,9 @@ export function createRateLimiter(options: {
     },
     clear() {
       hits.clear();
+    },
+    size() {
+      return hits.size;
     },
   };
 }
