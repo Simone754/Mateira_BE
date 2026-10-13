@@ -3,6 +3,7 @@ import { URL } from "node:url";
 
 import { json, notFound } from "./lib/http";
 import { HttpError } from "./lib/httpErrors";
+import { handleAuth } from "./modules/auth/routes";
 import { applyCors } from "./plugins/cors";
 import { prisma } from "./plugins/prisma";
 
@@ -48,6 +49,8 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
     }
     return;
   }
+
+  if (await handleAuth(req, res, pathname)) return;
 
   void parts;
   notFound(res);
