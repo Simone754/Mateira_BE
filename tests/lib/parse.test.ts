@@ -25,6 +25,14 @@ test("parsePage defaults to 1", () => {
   assert.equal(parsePage("0"), 1);
   assert.equal(parsePage("-2"), 1);
   assert.equal(parsePage(undefined), 1);
+  assert.equal(parsePage("abc"), 1);
+});
+
+test("parsePage clamps huge values so that page * limit stays a safe integer", () => {
+  assert.equal(parsePage("10000"), 10000);
+  assert.equal(parsePage("10001"), 10000);
+  assert.equal(parsePage("99999999999999999999"), 10000);
+  assert.ok(Number.isSafeInteger(parsePage("99999999999999999999") * 100));
 });
 
 test("parseBoolean accepts true, 1 and yes", () => {

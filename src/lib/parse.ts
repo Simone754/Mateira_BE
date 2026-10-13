@@ -4,9 +4,12 @@ export function parseLimit(value: string | null | undefined, fallback: number, m
   return Math.max(1, Math.min(parsed, max));
 }
 
+const MAX_PAGE = 10_000;
+
 export function parsePage(value: string | null | undefined): number {
   const parsed = Number.parseInt(value ?? "", 10);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : 1;
+  if (!Number.isFinite(parsed) || parsed < 1) return 1;
+  return Math.min(parsed, MAX_PAGE);
 }
 
 export function parseBoolean(value: string | null | undefined): boolean {
