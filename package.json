@@ -8,6 +8,7 @@
   "main": "dist/server.js",
   "scripts": {
     "dev": "tsx watch src/server.ts",
+    "prebuild": "prisma generate",
     "build": "tsc",
     "start": "node dist/server.js",
     "typecheck": "tsc -p tsconfig.typecheck.json",
@@ -15,9 +16,11 @@
     "db:down": "docker compose down",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
+    "db:deploy": "prisma migrate deploy",
     "db:test:migrate": "node --env-file=.env.test node_modules/prisma/build/index.js migrate deploy",
     "seed": "tsx src/scripts/seed-superuser.ts",
-    "test": "tsx --env-file=.env.test --test --test-concurrency=1 \"tests/**/*.test.ts\""
+    "test": "tsx --env-file=.env.test --test --test-concurrency=1 \"tests/**/*.test.ts\"",
+    "postinstall": "prisma generate"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1150.0",
@@ -25,14 +28,14 @@
     "@prisma/adapter-pg": "^7.10.0",
     "@prisma/client": "^7.10.0",
     "bcryptjs": "^2.4.3",
-    "pg": "^8.23.1"
+    "dotenv": "^18.0.7",
+    "pg": "^8.23.1",
+    "prisma": "^7.10.0"
   },
   "devDependencies": {
     "@types/bcryptjs": "^2.4.6",
     "@types/node": "^24.19.2",
     "@types/pg": "^8.23.1",
-    "dotenv": "^18.0.7",
-    "prisma": "^7.10.0",
     "tsx": "^4.23.15",
     "typescript": "^5.9.3"
   }
