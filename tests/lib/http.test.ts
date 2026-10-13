@@ -1,8 +1,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { IncomingMessage } from "node:http";
+import { Readable } from "node:stream";
 
-import { clientIp, parseCookies, serializeCookie } from "../../src/lib/http";
+import { clientIp, parseCookies, readJson, serializeCookie } from "../../src/lib/http";
+
+const is = (code: number) => (err: unknown) => (err as { status?: number }).status === code;
 
 test("parseCookies reads names and decodes values", () => {
   assert.deepEqual(parseCookies("a=1; b=hello%20world; c="), { a: "1", b: "hello world", c: "" });
@@ -26,4 +29,26 @@ test("clientIp ignores X-Forwarded-For unless the proxy is trusted", () => {
   } as unknown as IncomingMessage;
   assert.equal(clientIp(req, false), "127.0.0.1");
   assert.equal(clientIp(req, true), "9.9.9.9");
+});
+
+test("readJson decodes a multi-byte character split across chunks", async () => {
+  const full = Buffer.from('{"t":"perché"}', "utf8");
+  const split = full.indexOf(0xc3) + 1;
+  const req = Readable.from([full.subarray(0, split), full.subarray(split)]) as unknown as IncomingMessage;
+  assert.deepEqual(await readJson<{ t: string }>(req), { t: "perché" });
+});
+
+test("readJson returns null for an empty body", async () => {
+  const req = Readable.from([]) as unknown as IncomingMessage;
+  assert.equal(await readJson(req), null);
+});
+
+test("readJson rejects invalid JSON with 400", async () => {
+  const req = Readable.from([Buffer.from("{bad")]) as unknown as IncomingMessage;
+  await assert.rejects(readJson(req), is(400));
+});
+
+test("readJson rejects bodies over 1,000,000 bytes with 413", async () => {
+  const req = Readable.from([Buffer.alloc(600_000), Buffer.alloc(600_000)]) as unknown as IncomingMessage;
+  await assert.rejects(readJson(req), is(413));
 });

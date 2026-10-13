@@ -36,3 +36,18 @@ test("keys are independent and reset clears one key", () => {
   limiter.reset("a");
   assert.equal(limiter.check("a").allowed, true);
 });
+
+test("retry hint uses the hit that frees a slot when hits exceed max", () => {
+  let now = 0;
+  const limiter = createRateLimiter({ windowMs: 60_000, max: 2, now: () => now });
+  limiter.hit("k");
+  now = 10_000;
+  limiter.hit("k");
+  now = 20_000;
+  limiter.hit("k");
+
+  now = 30_000;
+  const blocked = limiter.check("k");
+  assert.equal(blocked.allowed, false);
+  assert.equal(blocked.retryAfterSec, 40);
+});

@@ -48,8 +48,13 @@ export function optEnum<T extends string>(o: Obj, key: string, values: readonly 
   return reqEnum(o, key, values);
 }
 
+const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}(:\d{2}(\.\d{1,9})?)?(Z|[+-]\d{2}:\d{2})?)?$/;
+
 export function reqDate(o: Obj, key: string): Date {
   const value = o[key];
+  if (typeof value !== "string" || !ISO_DATE_RE.test(value)) {
+    throw httpError(400, `${key} must be an ISO date`);
+  }
   const date = typeof value === "string" ? new Date(value) : null;
   if (!date || Number.isNaN(date.getTime())) throw httpError(400, `${key} must be an ISO date`);
   return date;

@@ -27,7 +27,7 @@ export function createRateLimiter(options: {
     check(key) {
       const list = recent(key);
       if (list.length < options.max) return { allowed: true, retryAfterSec: 0 };
-      const retryAt = list[0] + options.windowMs;
+      const retryAt = list[list.length - options.max] + options.windowMs;
       return { allowed: false, retryAfterSec: Math.max(1, Math.ceil((retryAt - now()) / 1000)) };
     },
     hit(key) {

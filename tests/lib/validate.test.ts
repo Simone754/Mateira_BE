@@ -54,6 +54,15 @@ test("reqDate and optDate parse ISO strings", () => {
   assert.equal(optDate({}, "d"), undefined);
 });
 
+test("reqDate accepts only ISO-shaped dates", () => {
+  assert.equal(reqDate({ d: "2026-10-07" }, "d").toISOString(), "2026-10-07T00:00:00.000Z");
+  assert.equal(reqDate({ d: "2026-10-07T10:00:00Z" }, "d").toISOString(), "2026-10-07T10:00:00.000Z");
+  assert.equal(reqDate({ d: "2026-10-07T10:00:00.123+02:00" }, "d").toISOString(), "2026-10-07T08:00:00.123Z");
+  for (const bad of ["5", "2026", "Tue Oct 07 2026", "2026-10-07 10:00"]) {
+    assert.throws(() => reqDate({ d: bad }, "d"), is400);
+  }
+});
+
 test("uuid helpers", () => {
   assert.equal(isUuid(UUID), true);
   assert.equal(isUuid("123"), false);

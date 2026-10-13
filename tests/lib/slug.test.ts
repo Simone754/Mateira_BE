@@ -18,3 +18,7 @@ test("slugify truncates long titles without a trailing dash", () => {
   assert.ok(slug.length <= 80);
   assert.ok(!slug.endsWith("-"));
 });
+
+test("slugify trims the dash left at the truncation point", () => {
+  assert.equal(slugify("a".repeat(79) + " bcd"), "a".repeat(79));
+});

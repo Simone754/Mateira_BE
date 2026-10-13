@@ -35,19 +35,24 @@ export function tooManyRequests(res: ServerResponse, retryAfterSec: number): voi
   json(res, 429, { error: "Too many requests" });
 }
 
+const MAX_BODY_BYTES = 1_000_000;
+
 export async function readJson<T = unknown>(req: IncomingMessage): Promise<T | null> {
-  let body = "";
+  const chunks: Buffer[] = [];
+  let size = 0;
   for await (const chunk of req) {
-    body += chunk;
-    if (body.length > 1_000_000) {
+    const buf = typeof chunk === "string" ? Buffer.from(chunk) : (chunk as Buffer);
+    size += buf.length;
+    if (size > MAX_BODY_BYTES) {
       throw httpError(413, "payload too large");
     }
+    chunks.push(buf);
   }
 
-  if (!body) return null;
+  if (size === 0) return null;
 
   try {
-    return JSON.parse(body) as T;
+    return JSON.parse(Buffer.concat(chunks).toString("utf8")) as T;
   } catch {
     throw httpError(400, "invalid json");
   }
@@ -96,6 +101,7 @@ export function setCookie(res: ServerResponse, cookie: string): void {
   res.setHeader("Set-Cookie", [...list, cookie]);
 }
 
+/** When trustProxy is true the first X-Forwarded-For entry is used, which is only safe if the proxy overwrites the header instead of appending to it. */
 export function clientIp(req: IncomingMessage, trustProxy: boolean): string {
   if (trustProxy) {
     const header = req.headers["x-forwarded-for"];
