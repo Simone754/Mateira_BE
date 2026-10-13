@@ -1,4 +1,5 @@
-import type { Media, News, Prisma } from "@prisma/client";
+import { Prisma } from "@prisma/client";
+import type { Media, News } from "@prisma/client";
 
 import { httpError } from "../../lib/httpErrors";
 import { slugify } from "../../lib/slug";
@@ -35,6 +36,13 @@ const TITLE_MAX = 200;
 const BODY_MAX = 50_000;
 const LINKS_MAX = 10;
 const EXCERPT_LENGTH = 220;
+
+/** How many times a write is retried when a concurrent request takes the slug first. */
+export const SLUG_ATTEMPTS = 10;
+
+export function isPrismaError(err: unknown, code: string): boolean {
+  return err instanceof Prisma.PrismaClientKnownRequestError && err.code === code;
+}
 
 export function parseExternalLinks(value: unknown): ExternalLink[] {
   if (!Array.isArray(value) || value.length > LINKS_MAX) {

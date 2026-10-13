@@ -4,6 +4,7 @@ import { URL } from "node:url";
 import type { Prisma } from "@prisma/client";
 
 import { empty, json, notFound, readJson } from "../../lib/http";
+import { httpError } from "../../lib/httpErrors";
 import { parseLimit, parsePage } from "../../lib/parse";
 import { asObject, isUuid, optEnum } from "../../lib/validate";
 import { requireAdmin } from "../../middlewares/requireAdmin";
@@ -11,17 +12,45 @@ import { prisma } from "../../plugins/prisma";
 import { CONTENT_STATUSES, NEWS_CATEGORIES } from "./dto";
 import {
   assertMediaExists,
+  isPrismaError,
   NEWS_INCLUDE,
+  NewsWithMedia,
   parseNewsCreate,
   parseNewsPatch,
   serializeAdmin,
   serializePublicDetail,
   serializePublicListItem,
+  SLUG_ATTEMPTS,
   toJsonLinks,
   uniqueSlug,
 } from "./service";
 
 const ORDER: Prisma.NewsOrderByWithRelationInput[] = [{ date: "desc" }, { id: "desc" }];
+
+/**
+ * Applies an update, retrying with a fresh slug when a concurrent request takes it first.
+ * Returns null when the news has been deleted in the meantime.
+ */
+async function updateNews(
+  id: string,
+  data: Prisma.NewsUpdateInput,
+  slugBase: string | null | undefined,
+): Promise<NewsWithMedia | null> {
+  for (let attempt = 0; attempt < SLUG_ATTEMPTS; attempt++) {
+    if (slugBase) data.slug = await uniqueSlug(slugBase, id);
+    try {
+      return await prisma.news.update({ where: { id }, data, include: NEWS_INCLUDE });
+    } catch (err) {
+      if (isPrismaError(err, "P2025")) {
+        const stillThere = await prisma.news.findUnique({ where: { id }, select: { id: true } });
+        if (!stillThere) return null;
+        throw httpError(400, "image or attachment not found");
+      }
+      if (!slugBase || !isPrismaError(err, "P2002")) throw err;
+    }
+  }
+  throw httpError(409, "could not generate a unique slug");
+}
 
 export async function handleNews(
   req: IncomingMessage,
@@ -94,29 +123,49 @@ async function handleAdmin(req: IncomingMessage, res: ServerResponse, url: URL, 
     const input = parseNewsCreate(asObject(await readJson(req)));
     await assertMediaExists([...(input.imageId ? [input.imageId] : []), ...input.attachmentIds]);
 
-    const slug = await uniqueSlug(input.slug ?? input.title);
-    const created = await prisma.news.create({
-      data: {
-        slug,
-        title: input.title,
-        date: input.date,
-        category: input.category,
-        body: input.body,
-        author: input.author,
-        externalLinks: toJsonLinks(input.externalLinks),
-        status: input.status,
-        publishedAt: input.status === "PUBLISHED" ? new Date() : null,
-        image: input.imageId ? { connect: { id: input.imageId } } : undefined,
-        attachments: { connect: input.attachmentIds.map((id) => ({ id })) },
-      },
-      include: NEWS_INCLUDE,
-    });
+    let created: NewsWithMedia | null = null;
+    for (let attempt = 0; attempt < SLUG_ATTEMPTS && !created; attempt++) {
+      const slug = await uniqueSlug(input.slug ?? input.title);
+      try {
+        created = await prisma.news.create({
+          data: {
+            slug,
+            title: input.title,
+            date: input.date,
+            category: input.category,
+            body: input.body,
+            author: input.author,
+            externalLinks: toJsonLinks(input.externalLinks),
+            status: input.status,
+            publishedAt: input.status === "PUBLISHED" ? new Date() : null,
+            image: input.imageId ? { connect: { id: input.imageId } } : undefined,
+            attachments: { connect: input.attachmentIds.map((id) => ({ id })) },
+          },
+          include: NEWS_INCLUDE,
+        });
+      } catch (err) {
+        // A media row vanished between the check and the connect.
+        if (isPrismaError(err, "P2025")) throw httpError(400, "image or attachment not found");
+        // A concurrent request took the slug first: compute it again.
+        if (!isPrismaError(err, "P2002")) throw err;
+      }
+    }
+    if (!created) throw httpError(409, "could not generate a unique slug");
+
     json(res, 201, serializeAdmin(created));
     return true;
   }
 
   if (parts.length === 4 && isUuid(parts[3])) {
     const id = parts[3];
+
+    if (req.method === "DELETE") {
+      const { count } = await prisma.news.deleteMany({ where: { id } });
+      if (count === 0) notFound(res);
+      else empty(res, 204);
+      return true;
+    }
+
     const existing = await prisma.news.findUnique({ where: { id }, include: NEWS_INCLUDE });
     if (!existing) {
       notFound(res);
@@ -134,7 +183,6 @@ async function handleAdmin(req: IncomingMessage, res: ServerResponse, url: URL, 
 
       const data: Prisma.NewsUpdateInput = {};
       if (patch.title !== undefined) data.title = patch.title;
-      if (patch.slug) data.slug = await uniqueSlug(patch.slug, id);
       if (patch.date !== undefined) data.date = patch.date;
       if (patch.category !== undefined) data.category = patch.category;
       if (patch.body !== undefined) data.body = patch.body;
@@ -151,14 +199,12 @@ async function handleAdmin(req: IncomingMessage, res: ServerResponse, url: URL, 
         if (patch.status === "PUBLISHED" && !existing.publishedAt) data.publishedAt = new Date();
       }
 
-      const updated = await prisma.news.update({ where: { id }, data, include: NEWS_INCLUDE });
+      const updated = await updateNews(id, data, patch.slug);
+      if (!updated) {
+        notFound(res);
+        return true;
+      }
       json(res, 200, serializeAdmin(updated));
-      return true;
-    }
-
-    if (req.method === "DELETE") {
-      await prisma.news.delete({ where: { id } });
-      empty(res, 204);
       return true;
     }
   }

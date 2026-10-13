@@ -40,8 +40,19 @@ async function createNews(overrides: Record<string, unknown> = {}) {
 }
 
 test("admin news routes need the admin token", async () => {
+  const created = await createNews({ title: "Protetta" });
+  const byId = `/api/admin/news/${created.id}`;
+
   assert.equal((await request("GET", "/api/admin/news")).status, 401);
   assert.equal((await request("POST", "/api/admin/news", { body: newsBody() })).status, 401);
+  assert.equal((await request("GET", byId)).status, 401);
+  assert.equal((await request("PATCH", byId, { body: { title: "Manomessa" } })).status, 401);
+  assert.equal((await request("DELETE", byId)).status, 401);
+  assert.equal((await request("GET", "/api/admin/news", { token: "garbage" })).status, 401);
+
+  const untouched = await request("GET", byId, { token });
+  assert.equal(untouched.status, 200, "an unauthenticated delete must not remove the news");
+  assert.equal(untouched.json.title, "Protetta", "an unauthenticated patch must not change the news");
 });
 
 test("creating news makes a draft with a slug from the title", async () => {
@@ -65,8 +76,25 @@ test("drafts are invisible to the public API", async () => {
   const list = await request("GET", "/api/public/news");
   assert.equal(list.status, 200);
   assert.equal(list.json.total, 0);
+  assert.deepEqual(list.json.items, []);
 
   assert.equal((await request("GET", `/api/public/news/${created.slug}`)).status, 404);
+});
+
+test("a draft never leaks next to a published news of the same category", async () => {
+  const draft = await createNews({ title: "Bozza ricerca", category: "RICERCA" });
+  const published = await createNews({ title: "Pubblicata ricerca", category: "RICERCA", status: "PUBLISHED" });
+
+  const filtered = await request("GET", "/api/public/news?category=RICERCA");
+  assert.equal(filtered.json.total, 1);
+  assert.deepEqual(filtered.json.items.map((n: any) => n.slug), [published.slug]);
+
+  const all = await request("GET", "/api/public/news");
+  assert.equal(all.json.total, 1);
+  assert.deepEqual(all.json.items.map((n: any) => n.slug), [published.slug]);
+
+  assert.equal((await request("GET", `/api/public/news/${draft.slug}`)).status, 404);
+  assert.equal((await request("GET", `/api/public/news/${published.slug}`)).status, 200);
 });
 
 test("publishing shows the news, unpublishing hides it again", async () => {
@@ -90,7 +118,9 @@ test("publishing shows the news, unpublishing hides it again", async () => {
   assert.equal(detail.json.id, undefined);
   assert.equal(detail.json.createdAt, undefined);
 
-  await request("PATCH", `/api/admin/news/${created.id}`, { token, body: { status: "DRAFT" } });
+  const unpublished = await request("PATCH", `/api/admin/news/${created.id}`, { token, body: { status: "DRAFT" } });
+  assert.equal(unpublished.status, 200);
+  assert.equal(unpublished.json.status, "DRAFT");
   assert.equal((await request("GET", `/api/public/news/${created.slug}`)).status, 404);
 });
 
@@ -230,4 +260,90 @@ test("delete removes the news everywhere", async () => {
   assert.equal((await request("DELETE", `/api/admin/news/${created.id}`, { token })).status, 204);
   assert.equal((await request("DELETE", `/api/admin/news/${created.id}`, { token })).status, 404);
   assert.equal((await request("GET", `/api/public/news/${created.slug}`)).status, 404);
+});
+
+test("patch and delete on unknown ids are 404", async () => {
+  const unknown = "/api/admin/news/6f9619ff-8b86-4d11-b42d-00c04fc964ff";
+  assert.equal((await request("PATCH", unknown, { token, body: { title: "x" } })).status, 404);
+  assert.equal((await request("DELETE", unknown, { token })).status, 404);
+});
+
+test("concurrent creates with the same title all succeed with distinct slugs", async () => {
+  const results = await Promise.all(
+    Array.from({ length: 5 }, () => request("POST", "/api/admin/news", { token, body: newsBody({ title: "Corsa" }) })),
+  );
+
+  assert.deepEqual(results.map((r) => r.status), [201, 201, 201, 201, 201], JSON.stringify(results.map((r) => r.json)));
+  const slugs = results.map((r) => r.json.slug as string);
+  assert.equal(new Set(slugs).size, 5, slugs.join(", "));
+  assert.ok(slugs.every((slug) => slug === "corsa" || /^corsa-\d+$/.test(slug)), slugs.join(", "));
+});
+
+test("concurrent patches to the same slug all succeed with distinct slugs", async () => {
+  const ids: string[] = [];
+  for (const n of [1, 2, 3]) ids.push((await createNews({ title: `Notizia ${n}` })).id);
+
+  const results = await Promise.all(
+    ids.map((id) => request("PATCH", `/api/admin/news/${id}`, { token, body: { slug: "indirizzo" } })),
+  );
+
+  assert.deepEqual(results.map((r) => r.status), [200, 200, 200], JSON.stringify(results.map((r) => r.json)));
+  const slugs = results.map((r) => r.json.slug as string);
+  assert.equal(new Set(slugs).size, 3, slugs.join(", "));
+  assert.ok(slugs.every((slug) => slug === "indirizzo" || /^indirizzo-\d+$/.test(slug)), slugs.join(", "));
+});
+
+test("concurrent deletes of the same news answer 204 once and 404 for the others", async () => {
+  const created = await createNews({ status: "PUBLISHED" });
+
+  const results = await Promise.all(
+    Array.from({ length: 3 }, () => request("DELETE", `/api/admin/news/${created.id}`, { token })),
+  );
+
+  assert.deepEqual(results.map((r) => r.status).sort(), [204, 404, 404]);
+});
+
+test("a patch racing a delete answers 200 or 404, never 500", async () => {
+  for (let round = 0; round < 5; round++) {
+    const created = await createNews({ title: `Gara ${round}` });
+
+    const [patch, del] = await Promise.all([
+      request("PATCH", `/api/admin/news/${created.id}`, {
+        token,
+        body: { title: "Cambiato", slug: `gara-cambiata-${round}`, attachmentIds: [] },
+      }),
+      request("DELETE", `/api/admin/news/${created.id}`, { token }),
+    ]);
+
+    assert.ok([200, 404].includes(patch.status), `round ${round}: patch answered ${patch.status} ${JSON.stringify(patch.json)}`);
+    assert.equal(del.status, 204, `round ${round}: delete answered ${del.status}`);
+  }
+});
+
+test("media that vanishes between the check and the write is a 400, not a 500", async () => {
+  const missing = "6f9619ff-8b86-4d11-b42d-00c04fc964ff";
+  const created = await createNews({ title: "Con allegato" });
+
+  // The existence check passes, as if the media row had been there a moment earlier.
+  const media = prisma.media as { count: unknown };
+  const originalCount = media.count;
+  let checks = 0;
+  media.count = async () => {
+    checks++;
+    return 1;
+  };
+  try {
+    const post = await request("POST", "/api/admin/news", { token, body: newsBody({ imageId: missing }) });
+    assert.equal(post.status, 400, JSON.stringify(post.json));
+
+    const patch = await request("PATCH", `/api/admin/news/${created.id}`, { token, body: { attachmentIds: [missing] } });
+    assert.equal(patch.status, 400, JSON.stringify(patch.json));
+
+    assert.equal(checks, 2, "the stubbed existence check must have been used");
+  } finally {
+    media.count = originalCount;
+  }
+
+  assert.equal((await request("GET", "/api/admin/news", { token })).json.total, 1, "the failed create left nothing behind");
+  assert.equal((await request("GET", `/api/admin/news/${created.id}`, { token })).status, 200);
 });
