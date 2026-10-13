@@ -20,7 +20,7 @@ export type RequestOptions = {
 
 export type Requester = (method: string, path: string, options?: RequestOptions) => Promise<TestResponse>;
 
-export async function startTestServer(): Promise<{ request: Requester; close: () => Promise<void> }> {
+export async function startTestServer(): Promise<{ request: Requester; close: () => Promise<void>; port: number }> {
   const server: Server = createApp();
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const { port } = server.address() as AddressInfo;
@@ -53,7 +53,7 @@ export async function startTestServer(): Promise<{ request: Requester; close: ()
     await new Promise<void>((resolve) => server.close(() => resolve()));
   };
 
-  return { request, close };
+  return { request, close, port };
 }
 
 export async function resetDb(): Promise<void> {

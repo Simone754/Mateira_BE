@@ -22,7 +22,14 @@ export function createApp(): http.Server {
     }
 
     handleRequest(req, res).catch((err: unknown) => {
+      // A response that already started cannot be replaced by an error body: cut the connection instead.
+      if (res.headersSent) {
+        res.destroy();
+        return;
+      }
       if (err instanceof HttpError) {
+        // The rest of an oversized body is never read, so the connection cannot be reused.
+        if (err.status === 413) res.setHeader("Connection", "close");
         return json(res, err.status, { error: err.message });
       }
       console.error(err);
@@ -32,9 +39,8 @@ export function createApp(): http.Server {
 }
 
 async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise<void> {
-  const hostHeader = req.headers.host;
-  const host = Array.isArray(hostHeader) ? hostHeader[0] : hostHeader || "localhost";
-  const url = new URL(req.url || "/", `http://${host}`);
+  // Only the path and the query are used: the Host header is client input and must not be able to break URL parsing.
+  const url = new URL(req.url || "/", "http://localhost");
   const pathname = url.pathname;
   const parts = pathname.split("/").filter(Boolean);
 
