@@ -10,7 +10,7 @@ import { requireAdmin } from "../../middlewares/requireAdmin";
 import { createPresignedUpload, deleteMediaObject, isMediaConfigured } from "../../plugins/media";
 import { prisma } from "../../plugins/prisma";
 import { PresignResponse } from "./dto";
-import { ALLOWED_TYPES, newObjectKey, serializeMedia } from "./service";
+import { findAllowedType, newObjectKey, serializeMedia } from "./service";
 
 const ALT_MAX = 300;
 
@@ -30,7 +30,7 @@ export async function handleMedia(
 
     const body = asObject(await readJson(req));
     const contentType = reqString(body, "contentType", 100).toLowerCase();
-    const type = ALLOWED_TYPES[contentType];
+    const type = findAllowedType(contentType);
     if (!type) {
       badRequest(res, "unsupported content type");
       return true;
@@ -44,7 +44,7 @@ export async function handleMedia(
 
     const alt = type.image ? reqString(body, "alt", ALT_MAX) : (optString(body, "alt", ALT_MAX) ?? null);
     const objectKey = newObjectKey(contentType);
-    const uploadUrl = await createPresignedUpload(objectKey, contentType);
+    const uploadUrl = await createPresignedUpload(objectKey, contentType, size);
     const media = await prisma.media.create({
       data: { bucket: MEDIA_BUCKET, objectKey, mimeType: contentType, size, alt },
     });
@@ -84,7 +84,7 @@ export async function handleMedia(
 
     if (req.method === "PATCH") {
       const body = asObject(await readJson(req));
-      const isImage = ALLOWED_TYPES[media.mimeType]?.image ?? false;
+      const isImage = findAllowedType(media.mimeType)?.image ?? false;
       const alt = optString(body, "alt", ALT_MAX);
       if (alt === undefined) {
         badRequest(res, "alt is required");

@@ -71,6 +71,31 @@ test("unsupported types and oversize files are rejected", async () => {
   assert.equal(zero.status, 400);
 });
 
+test("prototype keys are not accepted as content types", async () => {
+  for (const contentType of ["constructor", "__proto__"]) {
+    const res = await request("POST", "/api/admin/media/presign", {
+      token,
+      body: { contentType, size: 10, alt: "x" },
+    });
+    assert.equal(res.status, 400, `${contentType} must be rejected`);
+  }
+  assert.equal(await prisma.media.count(), 0);
+});
+
+test("the presigned URL binds content type and length", async () => {
+  const res = await request("POST", "/api/admin/media/presign", {
+    token,
+    body: { contentType: "image/png", size: 1234, alt: "Veduta del porto" },
+  });
+  assert.equal(res.status, 200);
+
+  const signedHeaders = (new URL(res.json.uploadUrl).searchParams.get("X-Amz-SignedHeaders") ?? "").split(";");
+  assert.ok(signedHeaders.includes("content-type"), `signed headers: ${signedHeaders.join(";")}`);
+  assert.ok(signedHeaders.includes("content-length"), `signed headers: ${signedHeaders.join(";")}`);
+  assert.ok(signedHeaders.includes("host"), `signed headers: ${signedHeaders.join(";")}`);
+  assert.deepEqual(res.json.headers, { "Content-Type": "image/png" });
+});
+
 test("list, update alt and delete", async () => {
   const created = await request("POST", "/api/admin/media/presign", { token, body: { contentType: "image/webp", size: 50, alt: "Prima" } });
   const id = created.json.media.id;

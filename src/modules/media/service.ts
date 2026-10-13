@@ -14,8 +14,12 @@ export const ALLOWED_TYPES: Record<string, { ext: string; image: boolean; maxByt
   "application/pdf": { ext: ".pdf", image: false, maxBytes: 25 * MB },
 };
 
+export function findAllowedType(contentType: string): { ext: string; image: boolean; maxBytes: number } | undefined {
+  return Object.hasOwn(ALLOWED_TYPES, contentType) ? ALLOWED_TYPES[contentType] : undefined;
+}
+
 export function newObjectKey(contentType: string, now: Date = new Date()): string {
-  const ext = ALLOWED_TYPES[contentType]?.ext ?? "";
+  const ext = findAllowedType(contentType)?.ext ?? "";
   return `media/${now.getUTCFullYear()}/${crypto.randomUUID()}${ext}`;
 }
 

@@ -39,9 +39,21 @@ export function buildMediaUrl(bucket: string, objectKey: string): string | null 
   return `${MEDIA_PUBLIC_BASE_URL.replace(/\/+$/, "")}/${stripSlashes(bucket)}/${stripSlashes(objectKey)}`;
 }
 
-export async function createPresignedUpload(objectKey: string, contentType: string): Promise<string> {
-  const command = new PutObjectCommand({ Bucket: MEDIA_BUCKET, Key: objectKey, ContentType: contentType });
-  return getSignedUrl(getMediaClient(), command, { expiresIn: MEDIA_PRESIGN_EXPIRES_IN });
+export async function createPresignedUpload(
+  objectKey: string,
+  contentType: string,
+  contentLength: number,
+): Promise<string> {
+  const command = new PutObjectCommand({
+    Bucket: MEDIA_BUCKET,
+    Key: objectKey,
+    ContentType: contentType,
+    ContentLength: contentLength,
+  });
+  return getSignedUrl(getMediaClient(), command, {
+    expiresIn: MEDIA_PRESIGN_EXPIRES_IN,
+    signableHeaders: new Set(["content-type", "content-length"]),
+  });
 }
 
 export async function deleteMediaObject(bucket: string, objectKey: string): Promise<void> {
