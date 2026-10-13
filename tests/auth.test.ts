@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 
 import { prisma } from "../src/plugins/prisma";
 import { signJwt } from "../src/plugins/jwt";
-import { ensureSuperuser } from "../src/modules/auth/service";
+import { ensureSuperuser, hashPassword } from "../src/modules/auth/service";
 import { resetLoginLimiters } from "../src/modules/auth/routes";
 import { closeDb, resetDb, startTestServer, type Requester } from "./helpers/app";
 import { ADMIN_EMAIL, ADMIN_PASSWORD, loginAsAdmin, refreshPair } from "./helpers/auth";
@@ -158,6 +158,74 @@ test("re-seeding with a different password revokes existing sessions", async () 
 
   const refreshed = await request("POST", "/api/admin/auth/refresh", { cookie });
   assert.equal(refreshed.status, 401);
+});
+
+test("seeding with a different email replaces the superuser instead of adding a second one", async () => {
+  const { cookie } = await loginAsAdmin(request);
+  const before = await prisma.user.findFirstOrThrow();
+
+  const updated = await ensureSuperuser("New.Admin@test.local", ADMIN_PASSWORD);
+
+  assert.equal(await prisma.user.count(), 1);
+  assert.equal(updated.id, before.id);
+  assert.equal(updated.email, "new.admin@test.local");
+
+  const oldLogin = await request("POST", "/api/admin/auth/login", { body: { email: ADMIN_EMAIL, password: ADMIN_PASSWORD } });
+  assert.equal(oldLogin.status, 401, "the old email must stop working");
+  const newLogin = await request("POST", "/api/admin/auth/login", { body: { email: "new.admin@test.local", password: ADMIN_PASSWORD } });
+  assert.equal(newLogin.status, 200);
+
+  const refreshed = await request("POST", "/api/admin/auth/refresh", { cookie });
+  assert.equal(refreshed.status, 401, "a session opened before the change must be revoked");
+});
+
+test("seeding with a different email and password changes both in one go", async () => {
+  await ensureSuperuser(ADMIN_EMAIL, ADMIN_PASSWORD);
+
+  await ensureSuperuser("other@test.local", "another-long-password");
+
+  assert.equal(await prisma.user.count(), 1);
+  const oldLogin = await request("POST", "/api/admin/auth/login", { body: { email: ADMIN_EMAIL, password: ADMIN_PASSWORD } });
+  assert.equal(oldLogin.status, 401);
+  const newLogin = await request("POST", "/api/admin/auth/login", { body: { email: "other@test.local", password: "another-long-password" } });
+  assert.equal(newLogin.status, 200);
+});
+
+test("re-seeding with identical values changes nothing and keeps sessions alive", async () => {
+  const { cookie } = await loginAsAdmin(request);
+  const before = await prisma.user.findFirstOrThrow();
+
+  const returned = await ensureSuperuser(ADMIN_EMAIL.toUpperCase(), ADMIN_PASSWORD);
+
+  const after = await prisma.user.findFirstOrThrow();
+  assert.equal(await prisma.user.count(), 1);
+  assert.equal(returned.id, before.id);
+  assert.equal(after.email, before.email);
+  assert.equal(after.passwordHash, before.passwordHash, "the hash must not be recomputed");
+  assert.equal(after.updatedAt.getTime(), before.updatedAt.getTime());
+
+  const refreshed = await request("POST", "/api/admin/auth/refresh", { cookie });
+  assert.equal(refreshed.status, 200);
+});
+
+test("seeding refuses to guess when more than one superuser exists", async () => {
+  const hash = await hashPassword(ADMIN_PASSWORD);
+  await prisma.user.create({ data: { email: "first@test.local", passwordHash: hash, role: "SUPERUSER" } });
+  await prisma.user.create({ data: { email: "second@test.local", passwordHash: hash, role: "SUPERUSER" } });
+  const before = await prisma.user.findMany({ orderBy: { email: "asc" } });
+
+  for (const [email, password] of [
+    ["first@test.local", ADMIN_PASSWORD],
+    ["third@test.local", ADMIN_PASSWORD],
+    ["first@test.local", "another-long-password"],
+  ]) {
+    await assert.rejects(
+      () => ensureSuperuser(email, password),
+      (e: any) => e.status === 409 && /more than one superuser/.test(e.message),
+    );
+  }
+
+  assert.deepEqual(await prisma.user.findMany({ orderBy: { email: "asc" } }), before, "no row may change");
 });
 
 test("the password is used exactly as typed, whitespace included", async () => {

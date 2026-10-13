@@ -100,6 +100,10 @@ export function serializeUser(user: User): AuthUser {
   return { id: user.id, email: user.email, role: user.role };
 }
 
+/**
+ * Makes the given credentials THE superuser: creates it when none exists, otherwise updates its email and password
+ * to match. Refuses to touch anything when more than one superuser exists.
+ */
 export async function ensureSuperuser(email: string, password: string): Promise<User> {
   const normalized = normalizeEmail(email);
   if (!normalized.includes("@")) throw httpError(400, "email is not valid");
@@ -107,19 +111,28 @@ export async function ensureSuperuser(email: string, password: string): Promise<
     throw httpError(400, `password must be at least ${PASSWORD_MIN_LENGTH} characters`);
   }
 
-  const existing = await prisma.user.findUnique({ where: { email: normalized } });
-  if (!existing) {
+  // Two rows are enough to know the answer: none, exactly one, or more than one.
+  const superusers = await prisma.user.findMany({ where: { role: "SUPERUSER" }, take: 2 });
+  if (superusers.length > 1) {
+    throw httpError(409, "more than one superuser exists; remove the extra ones manually");
+  }
+
+  if (superusers.length === 0) {
     return prisma.user.create({
       data: { email: normalized, passwordHash: await hashPassword(password), role: "SUPERUSER" },
     });
   }
 
-  // Re-running the seed with the same password changes nothing and keeps sessions alive.
-  if (await verifyPassword(password, existing.passwordHash)) return existing;
+  const existing = superusers[0];
+  const samePassword = await verifyPassword(password, existing.passwordHash);
 
-  // A new password ends every session opened with the old one.
+  // Re-running the seed with the same credentials changes nothing and keeps sessions alive.
+  if (existing.email === normalized && samePassword) return existing;
+
+  // A new email or password ends every session opened with the old ones.
+  const passwordHash = samePassword ? existing.passwordHash : await hashPassword(password);
   const [updated] = await prisma.$transaction([
-    prisma.user.update({ where: { id: existing.id }, data: { passwordHash: await hashPassword(password) } }),
+    prisma.user.update({ where: { id: existing.id }, data: { email: normalized, passwordHash } }),
     prisma.refreshToken.updateMany({
       where: { userId: existing.id, revokedAt: null },
       data: { revokedAt: new Date() },
