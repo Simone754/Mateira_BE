@@ -5,6 +5,7 @@ import { MEDIA_BUCKET } from "../../config/settings";
 import { badRequest, empty, json, notFound, readJson } from "../../lib/http";
 import { httpError } from "../../lib/httpErrors";
 import { parseLimit, parsePage } from "../../lib/parse";
+import { isPrismaError } from "../../lib/prismaErrors";
 import { asObject, isUuid, optString, reqString } from "../../lib/validate";
 import { requireAdmin } from "../../middlewares/requireAdmin";
 import { createPresignedUpload, deleteMediaObject, isMediaConfigured } from "../../plugins/media";
@@ -94,13 +95,25 @@ export async function handleMedia(
         badRequest(res, "alt is required for images");
         return true;
       }
-      const updated = await prisma.media.update({ where: { id }, data: { alt } });
-      json(res, 200, serializeMedia(updated));
+      try {
+        const updated = await prisma.media.update({ where: { id }, data: { alt } });
+        json(res, 200, serializeMedia(updated));
+      } catch (err) {
+        // A concurrent request removed the row after the lookup above.
+        if (!isPrismaError(err, "P2025")) throw err;
+        notFound(res);
+      }
       return true;
     }
 
     if (req.method === "DELETE") {
-      await prisma.media.delete({ where: { id } });
+      // deleteMany does not throw when a concurrent request got there first: only the one that removed the row
+      // (count 1) also removes the stored object, the others answer 404.
+      const { count } = await prisma.media.deleteMany({ where: { id } });
+      if (count === 0) {
+        notFound(res);
+        return true;
+      }
       await deleteMediaObject(media.bucket, media.objectKey);
       empty(res, 204);
       return true;

@@ -40,10 +40,6 @@ const EXCERPT_LENGTH = 220;
 /** How many times a write is retried when a concurrent request takes the slug first. */
 export const SLUG_ATTEMPTS = 10;
 
-export function isPrismaError(err: unknown, code: string): boolean {
-  return err instanceof Prisma.PrismaClientKnownRequestError && err.code === code;
-}
-
 export function parseExternalLinks(value: unknown): ExternalLink[] {
   if (!Array.isArray(value) || value.length > LINKS_MAX) {
     throw httpError(400, `externalLinks must be a list of at most ${LINKS_MAX} items`);

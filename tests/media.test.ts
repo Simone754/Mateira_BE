@@ -123,3 +123,68 @@ test("list, update alt and delete", async () => {
   }
   assert.equal(await prisma.media.count(), 0);
 });
+
+async function createMedia(alt = "Immagine"): Promise<string> {
+  const res = await request("POST", "/api/admin/media/presign", { token, body: { contentType: "image/png", size: 10, alt } });
+  assert.equal(res.status, 200, JSON.stringify(res.json));
+  return res.json.media.id;
+}
+
+test("concurrent deletes of the same media answer 204 once and 404 for the others", async () => {
+  const id = await createMedia();
+
+  const warn = mock.method(console, "warn", () => {});
+  try {
+    const results = await Promise.all(
+      Array.from({ length: 3 }, () => request("DELETE", `/api/admin/media/${id}`, { token })),
+    );
+
+    assert.deepEqual(results.map((r) => r.status).sort(), [204, 404, 404], JSON.stringify(results.map((r) => r.json)));
+    assert.equal(warn.mock.calls.length, 1, "only the request that removed the row tries to delete the stored object");
+  } finally {
+    warn.mock.restore();
+  }
+  assert.equal(await prisma.media.count(), 0);
+});
+
+test("a patch racing a delete answers 200 or 404, never 500", async () => {
+  const warn = mock.method(console, "warn", () => {});
+  try {
+    for (let round = 0; round < 5; round++) {
+      const id = await createMedia(`Gara ${round}`);
+
+      const [patch, del] = await Promise.all([
+        request("PATCH", `/api/admin/media/${id}`, { token, body: { alt: "Cambiata" } }),
+        request("DELETE", `/api/admin/media/${id}`, { token }),
+      ]);
+
+      assert.ok([200, 404].includes(patch.status), `round ${round}: patch answered ${patch.status} ${JSON.stringify(patch.json)}`);
+      assert.equal(del.status, 204, `round ${round}: delete answered ${del.status}`);
+    }
+  } finally {
+    warn.mock.restore();
+  }
+});
+
+test("a media row deleted right after the lookup is a 404 for patch and delete, not a 500", async () => {
+  const id = await createMedia();
+  const stale = await prisma.media.findUniqueOrThrow({ where: { id } });
+  await prisma.media.delete({ where: { id } });
+
+  // The lookup answers as if the row had still been there a moment earlier.
+  const media = prisma.media as { findUnique: unknown };
+  const originalFindUnique = media.findUnique;
+  media.findUnique = async () => stale;
+  const warn = mock.method(console, "warn", () => {});
+  try {
+    const patch = await request("PATCH", `/api/admin/media/${id}`, { token, body: { alt: "Tardiva" } });
+    assert.equal(patch.status, 404, JSON.stringify(patch.json));
+
+    const del = await request("DELETE", `/api/admin/media/${id}`, { token });
+    assert.equal(del.status, 404, JSON.stringify(del.json));
+    assert.equal(warn.mock.calls.length, 0, "no stored object is deleted when no row was removed");
+  } finally {
+    media.findUnique = originalFindUnique;
+    warn.mock.restore();
+  }
+});

@@ -6,13 +6,13 @@ import type { Prisma } from "@prisma/client";
 import { empty, json, notFound, readJson } from "../../lib/http";
 import { httpError } from "../../lib/httpErrors";
 import { parseLimit, parsePage } from "../../lib/parse";
+import { isPrismaError } from "../../lib/prismaErrors";
 import { asObject, isUuid, optEnum } from "../../lib/validate";
 import { requireAdmin } from "../../middlewares/requireAdmin";
 import { prisma } from "../../plugins/prisma";
 import { CONTENT_STATUSES, NEWS_CATEGORIES } from "./dto";
 import {
   assertMediaExists,
-  isPrismaError,
   NEWS_INCLUDE,
   NewsWithMedia,
   parseNewsCreate,
