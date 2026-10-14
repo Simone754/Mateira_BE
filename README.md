@@ -68,6 +68,7 @@ La configurazione viene validata all'avvio: un valore non valido ferma il proces
 | `LOGIN_RATE_MAX` | `5` | Tentativi di login falliti consentiti per coppia indirizzo IP + email nella finestra (intero da 1 a 100). Il limite per il solo indirizzo IP è 4 volte questo valore. |
 | `LOGIN_RATE_WINDOW` | `15m` | Finestra del limite sui login. |
 | `CORS_ORIGINS` | `http://localhost:5173` | Origini ammesse per CORS, separate da virgola. Il confronto ignora le maiuscole e le barre finali scritte nella variabile vengono tolte. |
+| `DOCS_ENABLED` | `true`; `false` se `NODE_ENV=production` | Abilita `/docs` (Swagger UI) e `/openapi.json`. Se la variabile non c'è o è vuota vale `true`, tranne quando `NODE_ENV` è `production`. Se è impostata, `true`, `1` e `yes` la attivano e qualsiasi altro valore la disattiva. Da attivare in produzione solo dietro una protezione. |
 | `SUPERUSER_EMAIL` | nessuno | Email del superuser, solo per lo script di seed. |
 | `SUPERUSER_PASSWORD` | nessuno | Password del superuser (almeno 12 caratteri), solo per lo script di seed. |
 | `MEDIA_ENDPOINT` | vuoto | Endpoint dello storage compatibile S3. |
@@ -107,6 +108,24 @@ Gli errori sono JSON nella forma `{ "error": "..." }`. Le risposte sotto `/api/a
 Le categorie delle news sono `MATEIRA`, `RICERCA`, `PROGRAMMI`, `VIAGGIO_TIRENAUTI`, `INCONTRI`, `COLLABORAZIONI`, `APPUNTAMENTI`, `PRESS` e `COMUNICATI`.
 
 L'upload dei media avviene in due passi: il front end chiama `presign`, poi invia il file con `PUT` direttamente all'`uploadUrl`, usando gli header indicati nella risposta (`Content-Type`). Il file non passa dall'API.
+
+## Documentazione API (Swagger)
+
+Con il server in esecuzione:
+
+- `http://localhost:4000/docs` apre Swagger UI, dove si provano tutte le rotte dal browser.
+- `http://localhost:4000/openapi.json` è il documento OpenAPI 3.0.3, scritto a mano in `src/modules/docs/openapi.ts`: si può anche importare in Postman o usare per generare un client.
+
+Per provare le rotte admin bastano due passi:
+
+1. Apri `/docs`, espandi `POST /api/admin/auth/login`, premi *Try it out*, inserisci email e password del superuser (quelle di `SUPERUSER_EMAIL` e `SUPERUSER_PASSWORD` usate dal seed) ed esegui.
+2. Il token di accesso viene applicato da solo al lucchetto *Authorize*, che si chiude: da quel momento ogni rotta con il lucchetto si prova con *Try it out*, per esempio `GET /api/admin/auth/me`. Non serve copiare il token.
+
+Il token dura `JWT_EXPIRES_IN`. `POST /api/admin/auth/refresh` ne ottiene uno nuovo (e lo applica da solo) e `POST /api/admin/auth/logout` chiude la sessione. Entrambe usano il cookie `mateira_refresh` (HttpOnly), che Swagger UI non può leggere né impostare: lo invia il browser da solo, perché `/docs` è servita dalla stessa origine dell'API. In sviluppo su http serve `COOKIE_SECURE=false`.
+
+Le pagine `/docs` e `/openapi.json` sono pubbliche: descrivono l'API ma non danno accesso ai dati. Per questo `DOCS_ENABLED` è attivo di default tranne in produzione. Il default in produzione vale solo se il processo ha `NODE_ENV=production` (`npm start` non lo imposta da solo): impostalo nell'ambiente di deploy oppure metti `DOCS_ENABLED=false`. Con la documentazione spenta le due pagine rispondono 404.
+
+**Regola per i nuovi moduli.** Ogni nuovo endpoint va descritto in `src/modules/docs/openapi.ts` (percorso, parametri, body con esempio, tutti gli status e gli schemi) e aggiunto all'elenco `ROUTES` di `tests/docs.test.ts`. I test controllano che il documento sia valido, che ogni rotta documentata esista e che quelle admin rispondano 401 senza token, ma non possono accorgersi di una rotta che nessuno ha documentato.
 
 ## Checklist di deploy
 
