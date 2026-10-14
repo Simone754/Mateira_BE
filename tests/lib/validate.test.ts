@@ -39,6 +39,42 @@ test("optString distinguishes absent, cleared and set", () => {
   assert.throws(() => optString({ a: 5 }, "a"), is400);
 });
 
+// The database cannot store a NUL in a text column or in JSON, nor a lone surrogate in JSON: both used to reach it and answer 500.
+const UNSTORABLE: [string, string][] = [
+  ["a NUL", "ab\u0000cd"],
+  ["only a NUL", "\u0000"],
+  ["a leading NUL", "\u0000abc"],
+  ["a lone high surrogate", "ab\ud800cd"],
+  ["a lone low surrogate", "ab\udc00cd"],
+  ["a trailing lone surrogate", "abc\ud83d"],
+  ["a reversed surrogate pair", "\ude00\ud83d"],
+];
+
+test("reqString rejects a NUL and a string that is not well formed, naming the field", () => {
+  for (const [what, value] of UNSTORABLE) {
+    assert.throws(
+      () => reqString({ title: value }, "title"),
+      (err: unknown) => is400(err) && /^title /.test((err as Error).message),
+      what,
+    );
+  }
+  // Well formed text is untouched: accents, an emoji (a valid surrogate pair), a tab and a line break.
+  assert.equal(reqString({ t: " perché 😀\tok\nsì " }, "t"), "perché 😀\tok\nsì");
+});
+
+test("optString rejects a NUL and a string that is not well formed, naming the field", () => {
+  for (const [what, value] of UNSTORABLE) {
+    assert.throws(
+      () => optString({ text: value }, "text"),
+      (err: unknown) => is400(err) && /^text /.test((err as Error).message),
+      what,
+    );
+  }
+  assert.equal(optString({ t: "perché 😀" }, "t"), "perché 😀");
+  assert.equal(optString({ t: "   " }, "t"), null);
+  assert.equal(optString({}, "t"), undefined);
+});
+
 test("reqEnum and optEnum only accept listed values", () => {
   const values = ["A", "B"] as const;
   assert.equal(reqEnum({ k: "A" }, "k", values), "A");

@@ -310,7 +310,8 @@ export function serializeAdmin(row: HomeBlock, images: Map<string, HomeImage>): 
  *
  * `ids` must be exactly the set of the existing blocks (400 otherwise; the existing ones are read inside the
  * transaction). A block deleted between that read and its update makes the whole reorder fail with 409 and nothing is
- * written. A block created in the meantime is not an error: it was not part of the request and stays after the others.
+ * written. A block created in the meantime is not an error and is kept, but it was not part of the request, so its final
+ * position is not guaranteed (it is usually last, but a position tied with another one can put it before).
  * The rows are written in ascending id order, so two reorders racing each other lock them in the same order.
  */
 export async function reorderBlocks(ids: string[]): Promise<void> {

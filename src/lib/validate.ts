@@ -15,8 +15,21 @@ export function asObject(value: unknown): Obj {
   return value as Obj;
 }
 
+// A NUL (U+0000) cannot be stored in a text column or in JSON, and a lone surrogate cannot be stored in JSON: the database
+// refuses both and the request would end in a 500. With the u flag a valid surrogate pair is one code point and does not
+// match, so this is true only for a lone surrogate (what `isWellFormed()` reports, which the build target does not type).
+const LONE_SURROGATE_RE = /[\ud800-\udfff]/u;
+
+/** Throws a 400 naming `key` when the text holds a NUL or is not well formed (a lone surrogate). */
+export function assertStorableText(value: string, key: string): void {
+  if (value.includes("\u0000") || LONE_SURROGATE_RE.test(value)) {
+    throw httpError(400, `${key} contains characters that cannot be stored`);
+  }
+}
+
 export function reqString(o: Obj, key: string, max = 200): string {
   const value = o[key];
+  if (typeof value === "string") assertStorableText(value, key);
   if (typeof value !== "string" || !value.trim()) throw httpError(400, `${key} is required`);
   const trimmed = value.trim();
   if (trimmed.length > max) throw httpError(400, `${key} is too long (max ${max})`);
@@ -29,6 +42,7 @@ export function optString(o: Obj, key: string, max = 200): string | null | undef
   const value = o[key];
   if (value === null) return null;
   if (typeof value !== "string") throw httpError(400, `${key} must be a string`);
+  assertStorableText(value, key);
   const trimmed = value.trim();
   if (!trimmed) return null;
   if (trimmed.length > max) throw httpError(400, `${key} is too long (max ${max})`);

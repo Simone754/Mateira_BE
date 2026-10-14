@@ -502,6 +502,9 @@ test("href rules: internal paths and http(s) addresses are accepted, everything 
     ["https://a.b/c", "https://a.b/c"],
     ["http://a.b", "http://a.b/"],
     ["HTTPS://Example.ORG/Pagina", "https://example.org/Pagina"],
+    ["/x\"><b>", "/x%22%3E%3Cb%3E"],
+    ["/x'y", "/x%27y"],
+    ["/news/titolo?x=1#a", "/news/titolo?x=1#a"],
   ];
   for (const [input, stored] of accepted) {
     const res = await post({ type: "CTA", content: ctaContent({ cta: { label: "Vai", href: input } }) });
@@ -519,6 +522,9 @@ test("href rules: internal paths and http(s) addresses are accepted, everything 
     "/a b",
     "https://a.b/c d",
     "/\\evil.example",
+    "/.//evil.example",
+    "https://user:pass@a.b/",
+    "https://a.b@evil.example/",
     "x",
     "www.example.org",
     "",
@@ -571,6 +577,50 @@ test("keys that exist on every object are unknown keys, never data", async () =>
     assert.match(res4.json.error, /^type must be one of: HERO, TICKER, CTA, FEATURED/);
   }
   assert.deepEqual(await adminBlocks(), []);
+});
+
+// The database cannot store a NUL in JSON, nor a lone surrogate: both used to reach it and answer 500.
+const UNSTORABLE_TEXTS = ["\u0000", "a\u0000b", "\ud800", "a\ud83db", "\ude00z"];
+
+test("a NUL or a lone surrogate in any text of the content is a 400 on create and on patch, never a 500", async () => {
+  // [type, content with `bad` in one text, what the message starts with]
+  const places: [BlockType, (bad: string) => unknown, RegExp][] = [
+    ["HERO", (bad) => heroContent({ title: bad }), /^content\.title /],
+    ["HERO", (bad) => heroContent({ text: bad }), /^content\.text /],
+    ["HERO", (bad) => heroContent({ primaryCta: { label: bad, href: "/x" } }), /^content\.primaryCta\.label /],
+    ["HERO", (bad) => heroContent({ secondaryCta: { label: bad, href: "/x" } }), /^content\.secondaryCta\.label /],
+    ["TICKER", (bad) => tickerContent({ items: [{ text: "ok" }, { text: bad }] }), /^content\.items\[1\]\.text /],
+    ["CTA", (bad) => ctaContent({ title: bad }), /^content\.title /],
+    ["CTA", (bad) => ctaContent({ text: bad }), /^content\.text /],
+    ["CTA", (bad) => ctaContent({ cta: { label: bad, href: "/x" } }), /^content\.cta\.label /],
+    ["FEATURED", (bad) => featuredContent({ title: bad }), /^content\.title /],
+    ["FEATURED", (bad) => featuredContent({ items: [{ title: bad, href: "/x" }] }), /^content\.items\[0\]\.title /],
+    ["FEATURED", (bad) => featuredContent({ items: [{ title: "T", text: bad, href: "/x" }] }), /^content\.items\[0\]\.text /],
+  ];
+
+  const existing = new Map<BlockType, any>();
+  for (const type of ["HERO", "TICKER", "CTA", "FEATURED"] as BlockType[]) existing.set(type, await createBlock(type));
+
+  for (const [type, build, message] of places) {
+    for (const bad of UNSTORABLE_TEXTS) {
+      const label = `${type} ${message} ${JSON.stringify(bad)}`;
+      const created = await post({ type, content: build(bad) });
+      assert.equal(created.status, 400, `create ${label}: ${created.status} ${JSON.stringify(created.json)}`);
+      assert.match(created.json.error, message, `create ${label}`);
+
+      const patched = await patch(existing.get(type).id, { content: build(bad) });
+      assert.equal(patched.status, 400, `patch ${label}: ${patched.status} ${JSON.stringify(patched.json)}`);
+      assert.match(patched.json.error, message, `patch ${label}`);
+    }
+  }
+
+  // Nothing was stored or changed, and valid text with accents and an emoji (a proper surrogate pair) still goes through.
+  const stored = await adminBlocks();
+  assert.equal(stored.length, 4);
+  for (const block of stored) assert.deepEqual(block.content, existing.get(block.type).content);
+  const fine = await post({ type: "CTA", content: ctaContent({ title: "Perché sì 😀" }) });
+  assert.equal(fine.status, 201, JSON.stringify(fine.json));
+  assert.equal(fine.json.content.title, "Perché sì 😀");
 });
 
 test("the request body itself is validated", async () => {
@@ -874,31 +924,41 @@ test("reordering rejects a list with a missing, an extra, a duplicated or a malf
   assert.deepEqual(titles(await adminBlocks()), ["A", "B", "C"], "no failed request changed the order");
 });
 
-test("a block deleted while the order is written is a 409 and the order stays as it was", async () => {
-  const a = await createBlock("CTA", ctaContent({ title: "A" }));
-  const b = await createBlock("CTA", ctaContent({ title: "B" }));
-  const c = await createBlock("CTA", ctaContent({ title: "C" }));
+test("a block deleted while the order is written is a 409 and nothing was written before it", async () => {
+  // Fixed ids, because the reorder writes the rows in ascending id order: A and C are written before Z, the block
+  // that vanishes. With random ids the vanishing block could come first and nothing would have been written yet.
+  const A = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+  const C = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+  const Z = "ffffffff-ffff-4fff-8fff-ffffffffffff";
+  for (const [position, id] of [[0, A], [1, C], [2, Z]] as [number, string][]) {
+    await prisma.homeBlock.create({ data: { id, type: "CTA", position, content: ctaContent({ title: id.slice(0, 1) }) } });
+  }
+  const positions = async () => Object.fromEntries((await adminBlocks()).map((block) => [block.id, block.position]));
+  assert.deepEqual(await positions(), { [A]: 0, [C]: 1, [Z]: 2 });
 
-  // The reorder reads the blocks inside its transaction: B is deleted right after that read.
-  const race = afterReorderRead(() => prisma.homeBlock.deleteMany({ where: { id: b.id } }));
+  // The new order moves A and C, both written before Z. Z is deleted right after the reorder has read the blocks.
+  const race = afterReorderRead(() => prisma.homeBlock.deleteMany({ where: { id: Z } }));
   try {
-    const res = await request("PUT", `${BLOCKS}/order`, { token, body: { ids: [c.id, b.id, a.id] } });
+    const res = await request("PUT", `${BLOCKS}/order`, { token, body: { ids: [C, A, Z] } });
     assert.equal(res.status, 409, JSON.stringify(res.json));
     assert.match(res.json.error, /deleted/);
     assert.equal(race.used(), 1, "the race was staged");
   } finally {
     race.restore();
   }
+  assert.deepEqual(await positions(), { [A]: 0, [C]: 1 }, "the writes made before the failure were rolled back");
 
-  assert.deepEqual(titles(await adminBlocks()), ["A", "C"], "the transaction was rolled back: A before C as before");
-  assert.deepEqual((await adminBlocks()).map((block) => block.position), [0, 2], "positions were not rewritten");
+  // Control: without the race the same move does rewrite A and C, so the check above could have failed.
+  const ok = await request("PUT", `${BLOCKS}/order`, { token, body: { ids: [C, A] } });
+  assert.equal(ok.status, 200, JSON.stringify(ok.json));
+  assert.deepEqual(await positions(), { [C]: 0, [A]: 1 });
 
-  // With the real transaction back, the same request is now a plain 400: B is gone.
-  const stale = await request("PUT", `${BLOCKS}/order`, { token, body: { ids: [c.id, b.id, a.id] } });
+  // With the real transaction back, a request that still lists Z is now a plain 400: Z is gone.
+  const stale = await request("PUT", `${BLOCKS}/order`, { token, body: { ids: [C, A, Z] } });
   assert.equal(stale.status, 400);
 });
 
-test("a block created while the order is written lands last and is not an error", async () => {
+test("a block created while the order is written is kept and is not an error", async () => {
   const a = await createBlock("CTA", ctaContent({ title: "A" }));
   const b = await createBlock("CTA", ctaContent({ title: "B" }));
 
@@ -909,10 +969,13 @@ test("a block created while the order is written lands last and is not an error"
     const res = await request("PUT", `${BLOCKS}/order`, { token, body: { ids: [b.id, a.id] } });
     assert.equal(res.status, 200, JSON.stringify(res.json));
     assert.equal(race.used(), 1, "the race was staged");
-    assert.deepEqual(titles(res.json.blocks), ["B", "A", "Nuovo"]);
+    // Where the new block ends up is not guaranteed (positions can tie): it is there, and the others are in order.
+    assert.ok(titles(res.json.blocks).includes("Nuovo"));
+    assert.deepEqual(titles(res.json.blocks).filter((title) => title !== "Nuovo"), ["B", "A"]);
   } finally {
     race.restore();
   }
+  assert.equal((await adminBlocks()).length, 3);
 });
 
 test("reorders racing deletes and creates never answer 500", async () => {
@@ -1130,11 +1193,35 @@ test("an image is checked when a card is written: it must exist and be an image"
   assert.equal(swapped.json.content.items[0].image.id, png.id);
 });
 
-test("a media type that only exists as a property name is not an image", async () => {
-  const odd = await createMedia("constructor", null);
-  const res = await post({ type: "FEATURED", content: featuredContent({ items: [{ title: "T", href: "/x", imageId: odd.id }] }) });
-  assert.equal(res.status, 400, JSON.stringify(res.json));
-  assert.match(res.json.error, /must be an image/);
+test("a media whose type is named like an object property is not an image", async () => {
+  // Plain rejection test: it does not prove how the allowlist is looked up (see the next test for that).
+  for (const mimeType of ["constructor", "__proto__", "toString"]) {
+    const odd = await createMedia(mimeType, null);
+    const res = await post({ type: "FEATURED", content: featuredContent({ items: [{ title: "T", href: "/x", imageId: odd.id }] }) });
+    assert.equal(res.status, 400, `${mimeType}: ${JSON.stringify(res.json)}`);
+    assert.match(res.json.error, /must be an image/, mimeType);
+  }
+});
+
+test("the media allowlist is looked up by own property: a type inherited from Object.prototype is not an image", async () => {
+  // A plain `ALLOWED_TYPES[mimeType]` lookup would find this inherited entry and accept the media as an image.
+  const key = "x-test/inherited-image";
+  const odd = await createMedia(key, null);
+  Object.defineProperty(Object.prototype, key, {
+    value: { ext: ".bin", image: true, maxBytes: 1 },
+    configurable: true,
+    enumerable: false,
+    writable: true,
+  });
+  try {
+    const res = await post({ type: "FEATURED", content: featuredContent({ items: [{ title: "T", href: "/x", imageId: odd.id }] }) });
+    assert.equal(res.status, 400, JSON.stringify(res.json));
+    assert.match(res.json.error, /^content\.items\[0\]\.imageId must be an image/);
+  } finally {
+    delete (Object.prototype as Record<string, unknown>)[key];
+  }
+  assert.equal((Object.prototype as Record<string, unknown>)[key], undefined, "the test left no trace on Object.prototype");
+  assert.deepEqual(await adminBlocks(), []);
 });
 
 test("a deleted media gives image null, not an error, on every reader", async () => {

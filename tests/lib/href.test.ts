@@ -116,3 +116,54 @@ test("parseHref names the field it was given", () => {
   assert.throws(() => parseHref(undefined, "href"), { message: "href is required" });
   assert.throws(() => parseHref(5, "href"), { message: "href must be a string" });
 });
+
+test("parseHref stores an internal path the way the URL parser writes it: nothing that can break out of an attribute", () => {
+  assert.equal(parseHref('/x"><script>alert(1)</script>', "href"), "/x%22%3E%3Cscript%3Ealert(1)%3C/script%3E");
+  assert.equal(parseHref("/x'onmouseover=alert(1)", "href"), "/x%27onmouseover=alert(1)");
+  assert.equal(parseHref("/x`y", "href"), "/x%60y");
+  assert.equal(parseHref("/a<b>c", "href"), "/a%3Cb%3Ec");
+  assert.equal(parseHref("/a{b}c", "href"), "/a%7Bb%7Dc");
+  assert.equal(parseHref("/x?a=\"1\"&b='2'#\"f\"'g'", "href"), "/x?a=%221%22&b=%272%27#%22f%22%27g%27");
+  for (const stored of ["/", "/x", "/come-lavoriamo", "/news/titolo?x=1#a", "/news?categoria=ricerca#elenco", "/percorso/%C3%A8", "/a/b/"]) {
+    assert.equal(parseHref(stored, "href"), stored, `${stored} is stored unchanged`);
+  }
+  // Dot segments are resolved, as a browser would do.
+  assert.equal(parseHref("/a/../b", "href"), "/b");
+  assert.equal(parseHref("/a/./b", "href"), "/a/b");
+  assert.equal(parseHref("/../x", "href"), "/x");
+  // The same input always gives the same output.
+  assert.equal(parseHref(parseHref('/x"y', "href"), "href"), parseHref('/x"y', "href"));
+});
+
+test("parseHref rejects an internal path that a URL parser resolves to another host", () => {
+  rejects("/.//evil.example");
+  rejects("/././/evil.example");
+  rejects("/%2e//evil.example");
+  rejects("/%2E//evil.example");
+  rejects("/a/..//evil.example");
+  rejects("/a/%2e%2e//evil.example");
+});
+
+test("parseHref limits an internal path to 300 characters after the URL parser has written it", () => {
+  const ok = `/${"a".repeat(299)}`;
+  assert.equal(parseHref(ok, "href"), ok);
+  // 151 characters as typed, 901 once every accent is percent-encoded.
+  rejects(`/${"è".repeat(150)}`);
+});
+
+test("parseHref rejects an external address with a username or a password", () => {
+  rejects("https://user:pass@a.b/");
+  rejects("https://user@a.b/");
+  rejects("https://a.b@evil.example/");
+  rejects("http://:pass@a.b/");
+  assert.equal(parseHref("https://a.b/?email=a@b.c", "href"), "https://a.b/?email=a@b.c");
+  assert.equal(parseHref("https://a.b/@x", "href"), "https://a.b/@x");
+  assert.equal(parseHref("https://a.b/c#@d", "href"), "https://a.b/c#@d");
+});
+
+test("parseHref rejects a lone surrogate in a path and in an address", () => {
+  rejects("/x\ud800y");
+  rejects("https://a.b/\udc00");
+  assert.equal(parseHref("/x%F0%9F%98%80", "href"), "/x%F0%9F%98%80");
+  assert.equal(parseHref("/x😀", "href"), "/x%F0%9F%98%80");
+});

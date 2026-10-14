@@ -185,6 +185,24 @@ test("input is validated", async () => {
   assert.equal((await post({ ...newsBody(), attachmentIds: ["not-a-uuid"] })).status, 400);
 });
 
+test("a NUL or a lone surrogate in a text is a 400, not a 500", async () => {
+  const created = await createNews({ title: "Intatta" });
+  for (const bad of ["Titolo\u0000nascosto", "Titolo\ud800rotto"]) {
+    const post = await request("POST", "/api/admin/news", { token, body: newsBody({ title: bad }) });
+    assert.equal(post.status, 400, JSON.stringify(post.json));
+    assert.match(post.json.error, /^title /);
+
+    assert.equal((await request("POST", "/api/admin/news", { token, body: newsBody({ body: bad }) })).status, 400);
+    assert.equal((await request("POST", "/api/admin/news", { token, body: newsBody({ author: bad }) })).status, 400);
+
+    const patch = await request("PATCH", `/api/admin/news/${created.id}`, { token, body: { title: bad } });
+    assert.equal(patch.status, 400, JSON.stringify(patch.json));
+  }
+  const list = await request("GET", "/api/admin/news", { token });
+  assert.equal(list.json.total, 1, "nothing was stored");
+  assert.equal(list.json.items[0].title, "Intatta");
+});
+
 test("image, attachments and external links come back serialized", async () => {
   const image = await prisma.media.create({
     data: { bucket: "mateira-media", objectKey: "media/2026/a.png", mimeType: "image/png", alt: "Il porto" },
