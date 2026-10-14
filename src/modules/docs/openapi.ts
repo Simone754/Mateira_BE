@@ -96,11 +96,23 @@ const newsWritableProperties = {
   status: { allOf: [ref("ContentStatus")], description: "Stato di pubblicazione. Se manca, una nuova news è `DRAFT`." },
 };
 
+/**
+ * A reference that may also be null. In OpenAPI 3.0.3 `nullable` next to `allOf` or `$ref` does not allow null (the
+ * referenced schema still has to match), so the null is a branch of its own.
+ */
+const nullableRef = (name: string, description: string) => ({
+  description,
+  anyOf: [ref(name), { type: "object", nullable: true, enum: [null] }],
+});
+
 /** The rules of a link, repeated in every field that holds one. */
 const HREF_RULES =
   "Percorso interno che inizia con una sola `/` (per esempio `/come-lavoriamo`, senza spazi, al massimo 300 caratteri) " +
-  "oppure indirizzo `http` o `https` valido (al massimo 500 caratteri), che viene normalizzato. " +
-  "Sono rifiutati `javascript:`, `data:`, `mailto:`, gli indirizzi che iniziano con `//` e quelli con spazi o backslash.";
+  "oppure indirizzo `http` o `https` valido (al massimo 500 caratteri) senza nome utente né password. " +
+  "Viene salvato come lo scrive il parser degli indirizzi: i segmenti `.` e `..` sono risolti e i caratteri che potrebbero " +
+  "uscire da un attributo HTML (virgolette, apice, `<`, `>`, backtick) sono codificati con `%`; un percorso semplice resta uguale. " +
+  "Sono rifiutati `javascript:`, `data:`, `mailto:`, gli indirizzi che iniziano con `//` (anche quelli che i segmenti `.` riportano a `//`) " +
+  "e quelli con spazi, backslash, caratteri di controllo o non validi.";
 
 const hrefProperty = (description: string, extra: object = {}) => ({
   type: "string",
@@ -729,7 +741,8 @@ export const openApiSpec = {
           "Le posizioni vengono riscritte come 0, 1, 2... in una sola transazione e la risposta è l'elenco aggiornato. " +
           "Con un id mancante, sconosciuto, ripetuto o non valido la risposta è 400 e nulla cambia. " +
           "Se un blocco viene cancellato mentre l'ordine si scrive la risposta è 409 e nulla cambia: ricarica l'elenco e riprova. " +
-          "Un blocco creato nello stesso momento non è un errore: resta dopo gli altri.",
+          "Un blocco creato mentre il riordino è in corso non è un errore e viene conservato, ma non faceva parte della richiesta: " +
+          "la sua posizione finale non è garantita (di solito è l'ultima, ma con posizioni uguali può finire prima degli altri).",
         security: bearer,
         requestBody: {
           required: true,
@@ -1058,7 +1071,7 @@ export const openApiSpec = {
           category: ref("NewsCategory"),
           excerpt: { type: "string", description: "Inizio del testo, al massimo 220 caratteri, su una riga.", example: "Primo paragrafo della news." },
           author: { type: "string", nullable: true, example: "Redazione Mateira" },
-          image: { type: "object", allOf: [ref("MediaRef")], nullable: true, description: "Immagine di copertina, se c'è." },
+          image: nullableRef("MediaRef", "Immagine di copertina, se c'è; altrimenti `null`."),
           publishedAt: { type: "string", format: "date-time", nullable: true, description: "Quando la news è stata pubblicata per la prima volta." },
         },
       },
@@ -1126,7 +1139,7 @@ export const openApiSpec = {
             example: "Ricerca, programmi e viaggi per capire il presente.",
           },
           primaryCta: ref("HomeCta"),
-          secondaryCta: { type: "object", allOf: [ref("HomeCta")], nullable: true, description: "Seconda azione, facoltativa." },
+          secondaryCta: nullableRef("HomeCta", "Seconda azione, facoltativa. Assente o `null` vale nessuna; nelle risposte è `null`."),
         },
       },
       HomeTickerItem: {
@@ -1189,10 +1202,10 @@ export const openApiSpec = {
           href: hrefProperty("Destinazione della scheda.", { example: "/news/nuovo-laboratorio-di-ricerca" }),
           imageId: {
             type: "string",
-            format: "uuid",
             nullable: true,
             description:
-              "Id di un media esistente che sia un'immagine (non un PDF), altrimenti 400. Vuoto o `null` vale nessuna immagine. " +
+              "Id (uuid) di un media esistente che sia un'immagine (non un PDF), altrimenti 400. Spazi ai bordi e maiuscole sono tollerati. " +
+              "Vuoto o `null` vale nessuna immagine, per questo non è dichiarato `format: uuid`. " +
               "Nelle risposte al suo posto c'è `image`.",
             example: MEDIA_ID,
           },
@@ -1230,12 +1243,10 @@ export const openApiSpec = {
           title: { type: "string", example: "Nuovo laboratorio di ricerca" },
           text: { type: "string", nullable: true, example: "Aperte le iscrizioni." },
           href: { type: "string", example: "/news/nuovo-laboratorio-di-ricerca" },
-          image: {
-            type: "object",
-            allOf: [ref("HomeImage")],
-            nullable: true,
-            description: "`null` se la scheda non ha immagine o se il media è stato cancellato: la scheda continua a funzionare.",
-          },
+          image: nullableRef(
+            "HomeImage",
+            "`null` se la scheda non ha immagine o se il media è stato cancellato: la scheda continua a funzionare.",
+          ),
         },
       },
       HomeFeaturedContent: {
@@ -1268,6 +1279,7 @@ export const openApiSpec = {
       HomeBlockUpdateRequest: {
         type: "object",
         description: "Almeno uno dei due campi. `type` non è ammesso.",
+        minProperties: 1,
         additionalProperties: false,
         properties: {
           content: { allOf: [ref("HomeContentRequest")], description: "Il nuovo contenuto, che sostituisce per intero quello attuale." },
@@ -1281,8 +1293,9 @@ export const openApiSpec = {
         properties: {
           ids: {
             type: "array",
+            uniqueItems: true,
             items: { type: "string", format: "uuid" },
-            description: "Gli id di tutti i blocchi esistenti, ciascuno una volta, nell'ordine voluto.",
+            description: "Gli id di tutti i blocchi esistenti, ciascuno una volta (un id ripetuto è un 400), nell'ordine voluto.",
           },
         },
       },

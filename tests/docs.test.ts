@@ -7,6 +7,8 @@ import * as path from "node:path";
 import vm from "node:vm";
 
 import SwaggerParser from "@apidevtools/swagger-parser";
+// Not a dependency of the project: it is the validator swagger-parser itself uses, so it is always installed next to it.
+import Ajv from "ajv";
 
 import { openApiSpec } from "../src/modules/docs/openapi";
 import { handleDocs } from "../src/modules/docs/routes";
@@ -779,6 +781,160 @@ test("the documented Home request examples are accepted by the real router", asy
   });
   assert.equal(reorder.status, 400);
   assert.ok(Object.keys(order.responses).includes("400"));
+});
+
+test("no schema pairs nullable with allOf: in OpenAPI 3.0.3 that does not accept null", () => {
+  // `{ nullable: true, allOf: [{ $ref }] }` still requires whatever the referenced schema requires, null included.
+  const offenders: string[] = [];
+  const walk = (node: any, where: string) => {
+    if (Array.isArray(node)) return node.forEach((item, i) => walk(item, `${where}/${i}`));
+    if (!node || typeof node !== "object") return;
+    if (node.nullable === true && "allOf" in node) offenders.push(where);
+    for (const [name, child] of Object.entries(node)) walk(child, `${where}/${name}`);
+  };
+  walk(openApiSpec, "#");
+  assert.deepEqual(offenders, []);
+});
+
+test("the Home request schemas describe exactly what the code accepts", () => {
+  const schemas: any = openApiSpec.components.schemas;
+
+  // An empty imageId means "no image" and a uuid may carry spaces or capitals: a uuid format would be a false promise.
+  const imageId = schemas.HomeFeaturedItemRequest.properties.imageId;
+  assert.equal(imageId.format, undefined);
+  assert.equal(imageId.type, "string");
+  assert.equal(imageId.nullable, true);
+
+  // A reorder with a repeated id is a 400, and a patch needs at least one of its two fields.
+  assert.equal(schemas.HomeBlockOrderRequest.properties.ids.uniqueItems, true);
+  assert.equal(schemas.HomeBlockUpdateRequest.minProperties, 1);
+  assert.equal(schemas.HomeBlockCreateRequest.minProperties, undefined);
+
+  // A block created while the order is written is kept, but where it ends up is not promised.
+  const order: any = (openApiSpec.paths as any)["/api/admin/home-blocks/order"].put;
+  assert.match(order.description, /non è garantita/);
+  assert.ok(!/resta dopo gli altri|resta in fondo/.test(order.description));
+});
+
+/** Compiles the schema the document gives to the answer `status` of an operation; its references point into the document. */
+function validatorFor(ajv: Ajv, pathName: string, method: string, status: string) {
+  const schema = (openApiSpec.paths as any)[pathName][method].responses[status].content["application/json"].schema;
+  assert.equal(typeof schema.$ref, "string", `${method} ${pathName} ${status} answers with a named schema`);
+  return ajv.compile({ $ref: `openapi${schema.$ref}` });
+}
+
+test("real Home and news answers, null parts included, match the documented response schemas", async () => {
+  await resetDb();
+  const { token } = await loginAsAdmin(request);
+  const ajv = new Ajv({ strict: false, allErrors: true, validateFormats: false });
+  ajv.addSchema(structuredClone(openApiSpec), "openapi");
+
+  const conforms = (label: string, validate: ReturnType<typeof validatorFor>, value: unknown) => {
+    assert.ok(validate(value), `${label} does not match the document: ${ajv.errorsText(validate.errors)}\n${JSON.stringify(value)}`);
+  };
+  const send = (method: string, path: string, body?: unknown) => request(method, path, { token, body });
+
+  const image = await prisma.media.create({
+    data: { bucket: "mateira-media", objectKey: newObjectKey("image/png"), mimeType: "image/png", alt: "Il porto" },
+  });
+  const gone = await prisma.media.create({
+    data: { bucket: "mateira-media", objectKey: newObjectKey("image/png"), mimeType: "image/png", alt: "Sparita" },
+  });
+
+  const createBlock = validatorFor(ajv, "/api/admin/home-blocks", "post", "201");
+  const blockIds: string[] = [];
+  const blocks = [
+    // text and secondaryCta absent: both come back as null
+    { type: "HERO", content: { title: "Solo il titolo", primaryCta: { label: "Vai", href: "/x" } } },
+    {
+      type: "HERO",
+      content: {
+        title: "Completo",
+        text: "Testo",
+        primaryCta: { label: "Vai", href: "/x" },
+        secondaryCta: { label: "Altro", href: "https://example.org/" },
+      },
+    },
+    { type: "TICKER", content: { items: [{ text: "Con link", href: "/x" }, { text: "Senza link" }] } },
+    { type: "CTA", content: { title: "Invito", cta: { label: "Vai", href: "/x" } } },
+    {
+      type: "FEATURED",
+      content: {
+        title: "Schede",
+        items: [
+          { title: "Con immagine", text: "Testo", href: "/a", imageId: image.id },
+          { title: "Senza immagine", href: "/b" },
+          { title: "Immagine che sparirà", href: "/c", imageId: gone.id },
+        ],
+      },
+    },
+  ];
+  for (const block of blocks) {
+    const res = await send("POST", "/api/admin/home-blocks", { ...block, status: "PUBLISHED" });
+    assert.equal(res.status, 201, JSON.stringify(res.json));
+    conforms(`POST ${block.type}`, createBlock, res.json);
+    blockIds.push(res.json.id);
+  }
+  await prisma.media.delete({ where: { id: gone.id } });
+
+  const publicHome = await send("GET", "/api/public/home");
+  conforms("GET /api/public/home", validatorFor(ajv, "/api/public/home", "get", "200"), publicHome.json);
+  const cards = publicHome.json.blocks.find((block: any) => block.type === "FEATURED").content.items;
+  assert.deepEqual(cards.map((card: any) => card.image === null), [false, true, true], "the case under test is really there");
+  assert.equal(publicHome.json.blocks[0].content.secondaryCta, null, "and so is a null secondaryCta");
+
+  const list = await send("GET", "/api/admin/home-blocks");
+  conforms("GET /api/admin/home-blocks", validatorFor(ajv, "/api/admin/home-blocks", "get", "200"), list.json);
+  const getOne = validatorFor(ajv, "/api/admin/home-blocks/{id}", "get", "200");
+  for (const id of blockIds) conforms("GET /api/admin/home-blocks/{id}", getOne, (await send("GET", `/api/admin/home-blocks/${id}`)).json);
+
+  const patched = await send("PATCH", `/api/admin/home-blocks/${blockIds[1]}`, { status: "DRAFT" });
+  conforms("PATCH /api/admin/home-blocks/{id}", validatorFor(ajv, "/api/admin/home-blocks/{id}", "patch", "200"), patched.json);
+  const reordered = await send("PUT", "/api/admin/home-blocks/order", { ids: [...blockIds].reverse() });
+  assert.equal(reordered.status, 200, JSON.stringify(reordered.json));
+  conforms("PUT /api/admin/home-blocks/order", validatorFor(ajv, "/api/admin/home-blocks/order", "put", "200"), reordered.json);
+
+  // News: one with no image (null), one with an image and an attachment.
+  const plain = await send("POST", "/api/admin/news", {
+    title: "Senza immagine",
+    date: "2026-10-01",
+    category: "MATEIRA",
+    body: "Testo.",
+    status: "PUBLISHED",
+  });
+  assert.equal(plain.status, 201, JSON.stringify(plain.json));
+  assert.equal(plain.json.image, null, "the case under test is really there");
+  const illustrated = await send("POST", "/api/admin/news", {
+    title: "Con immagine",
+    date: "2026-10-02",
+    category: "RICERCA",
+    body: "Testo.",
+    status: "PUBLISHED",
+    imageId: image.id,
+    attachmentIds: [image.id],
+    externalLinks: [{ label: "Sito", url: "https://example.org/" }],
+  });
+  assert.equal(illustrated.status, 201, JSON.stringify(illustrated.json));
+  conforms("POST /api/admin/news", validatorFor(ajv, "/api/admin/news", "post", "201"), plain.json);
+  conforms("POST /api/admin/news (with image)", validatorFor(ajv, "/api/admin/news", "post", "201"), illustrated.json);
+  conforms("GET /api/admin/news", validatorFor(ajv, "/api/admin/news", "get", "200"), (await send("GET", "/api/admin/news")).json);
+  conforms("GET /api/admin/news/{id}", validatorFor(ajv, "/api/admin/news/{id}", "get", "200"), (await send("GET", `/api/admin/news/${plain.json.id}`)).json);
+  const publicNews = await send("GET", "/api/public/news");
+  conforms("GET /api/public/news", validatorFor(ajv, "/api/public/news", "get", "200"), publicNews.json);
+  conforms(
+    "GET /api/public/news/{slug}",
+    validatorFor(ajv, "/api/public/news/{slug}", "get", "200"),
+    (await send("GET", `/api/public/news/${plain.json.slug}`)).json,
+  );
+
+  // The check can fail: a block without its position, or with a null where the document wants an object, is refused.
+  const adminBlock = validatorFor(ajv, "/api/admin/home-blocks/{id}", "get", "200");
+  const { position, ...withoutPosition } = (await send("GET", `/api/admin/home-blocks/${blockIds[0]}`)).json;
+  assert.ok(position !== undefined);
+  assert.equal(adminBlock(withoutPosition), false);
+  const brokenHero = (await send("GET", `/api/admin/home-blocks/${blockIds[0]}`)).json;
+  brokenHero.content.primaryCta = null;
+  assert.equal(adminBlock(brokenHero), false);
 });
 
 test("the limits written in the Home schemas are the ones the code enforces", () => {
