@@ -95,3 +95,10 @@ export function optUuidList(o: Obj, key: string, max = 10): string[] | undefined
   }
   return [...new Set(value)];
 }
+
+/** Rejects (400, naming the key) every own key of `o` that is not in `allowed`. */
+export function assertOnlyKeys(o: Obj, allowed: readonly string[]): void {
+  for (const key of Object.keys(o)) {
+    if (!allowed.includes(key)) throw httpError(400, `${key} is not allowed`);
+  }
+}

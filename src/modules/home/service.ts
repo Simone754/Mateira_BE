@@ -2,7 +2,7 @@ import type { HomeBlock, Prisma } from "@prisma/client";
 
 import { parseHref } from "../../lib/href";
 import { HttpError, httpError } from "../../lib/httpErrors";
-import { isUuid, optString, reqString } from "../../lib/validate";
+import { assertOnlyKeys, isUuid, optString, reqString } from "../../lib/validate";
 import { prisma } from "../../plugins/prisma";
 import { findAllowedType, serializeMedia } from "../media/service";
 import type {
@@ -61,13 +61,6 @@ function inPath<T>(path: string, fn: () => T): T {
 function plainObject(value: unknown, name: string): Obj {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw httpError(400, `${name} must be an object`);
   return value as Obj;
-}
-
-/** Rejects (400, naming the key) every own key of `o` that is not in `allowed`. */
-export function assertOnlyKeys(o: Obj, allowed: readonly string[]): void {
-  for (const key of Object.keys(o)) {
-    if (!allowed.includes(key)) throw httpError(400, `${key} is not allowed`);
-  }
 }
 
 function parseCtaField(o: Obj, key: string, required: boolean): HomeCta | null {

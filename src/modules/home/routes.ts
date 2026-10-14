@@ -6,13 +6,12 @@ import type { Prisma } from "@prisma/client";
 import { empty, json, notFound, readJson } from "../../lib/http";
 import { httpError } from "../../lib/httpErrors";
 import { isPrismaError } from "../../lib/prismaErrors";
-import { asObject, isUuid, optEnum, reqEnum } from "../../lib/validate";
+import { asObject, assertOnlyKeys, isUuid, optEnum, reqEnum } from "../../lib/validate";
 import { type AdminSession, hasSession } from "../../middlewares/adminGuard";
 import { prisma } from "../../plugins/prisma";
 import { CONTENT_STATUSES, HOME_BLOCK_TYPES } from "./dto";
 import {
   assertImagesUsable,
-  assertOnlyKeys,
   listBlocks,
   loadImages,
   nextPosition,

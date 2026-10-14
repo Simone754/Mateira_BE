@@ -100,3 +100,20 @@ model HomeBlock {
 
   @@index([status, position])
 }
+
+model Word {
+  id          String        @id @default(uuid())
+  term        String
+  etymology   String        @db.Text
+  meaning     String        @db.Text
+  closing     String?
+  page        String
+  position    Int
+  status      ContentStatus @default(DRAFT)
+  publishedAt DateTime?
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  @@unique([page, term])
+  @@index([page, status, position])
+}

@@ -10,6 +10,7 @@ import { handleDocs } from "./modules/docs/routes";
 import { handleHome } from "./modules/home/routes";
 import { handleMedia } from "./modules/media/routes";
 import { handleNews } from "./modules/news/routes";
+import { handleWords } from "./modules/words/routes";
 import { applyCors } from "./plugins/cors";
 import { prisma } from "./plugins/prisma";
 
@@ -76,6 +77,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
   if (await handleMedia(req, res, url, parts, session)) return;
   if (await handleNews(req, res, url, parts, session)) return;
   if (await handleHome(req, res, url, parts, session)) return;
+  if (await handleWords(req, res, url, parts, session)) return;
 
   notFound(res);
 }
