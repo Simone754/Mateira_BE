@@ -4,6 +4,7 @@ import { URL } from "node:url";
 import { json, notFound } from "./lib/http";
 import { HttpError } from "./lib/httpErrors";
 import { handleAuth } from "./modules/auth/routes";
+import { handleDocs } from "./modules/docs/routes";
 import { handleMedia } from "./modules/media/routes";
 import { handleNews } from "./modules/news/routes";
 import { applyCors } from "./plugins/cors";
@@ -58,6 +59,8 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
     return;
   }
 
+  // Documentation lives outside /api (/docs, /openapi.json): it needs no token.
+  if (await handleDocs(req, res, pathname)) return;
   if (await handleAuth(req, res, pathname)) return;
   if (await handleMedia(req, res, url, parts)) return;
   if (await handleNews(req, res, url, parts)) return;

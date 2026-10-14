@@ -21,6 +21,13 @@ export const BCRYPT_SALT_ROUNDS = parseIntEnv("BCRYPT_SALT_ROUNDS", process.env.
 const cookieSecure = process.env.COOKIE_SECURE;
 export const COOKIE_SECURE = cookieSecure === undefined || cookieSecure.trim() === "" ? true : parseBoolean(cookieSecure);
 
+// The API documentation is a developer tool: on by default, off in production unless DOCS_ENABLED says otherwise.
+const docsEnabled = process.env.DOCS_ENABLED;
+export const DOCS_ENABLED =
+  docsEnabled === undefined || docsEnabled.trim() === ""
+    ? process.env.NODE_ENV !== "production"
+    : parseBoolean(docsEnabled);
+
 /** How many reverse proxies sit in front of the app and append to X-Forwarded-For. 0 means none: the header is ignored. */
 export const TRUST_PROXY_HOPS = parseIntEnv("TRUST_PROXY_HOPS", process.env.TRUST_PROXY_HOPS, 0, 0, 5);
 

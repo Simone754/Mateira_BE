@@ -69,6 +69,7 @@ test("defaults apply when only JWT_SECRET is set, and cookies are Secure", async
   assert.equal(s.LOGIN_RATE_WINDOW, 900);
   assert.equal(s.MEDIA_PRESIGN_EXPIRES_IN, 900);
   assert.equal(s.COOKIE_SECURE, true);
+  assert.equal(s.DOCS_ENABLED, true);
   assert.deepEqual(s.corsOrigins, ["http://localhost:5173"]);
 });
 
@@ -175,4 +176,42 @@ test("COOKIE_SECURE is on unless it is explicitly turned off", async () => {
   ];
   const results = await Promise.all(cases.map(([value]) => assertAccepted({ COOKIE_SECURE: value })));
   results.forEach((settings, i) => assert.equal(settings.COOKIE_SECURE, cases[i][1], `COOKIE_SECURE=${cases[i][0]}`));
+});
+
+test("DOCS_ENABLED is on by default and off in production", async () => {
+  const cases: [string | undefined, boolean][] = [
+    [undefined, true],
+    ["development", true],
+    ["test", true],
+    ["production", false],
+  ];
+  const results = await Promise.all(cases.map(([nodeEnv]) => assertAccepted({ NODE_ENV: nodeEnv })));
+  results.forEach((settings, i) => assert.equal(settings.DOCS_ENABLED, cases[i][1], `NODE_ENV=${cases[i][0]}`));
+});
+
+test("an empty DOCS_ENABLED behaves like an unset one", async () => {
+  const [dev, prod] = await Promise.all([
+    assertAccepted({ DOCS_ENABLED: "", NODE_ENV: "development" }),
+    assertAccepted({ DOCS_ENABLED: "", NODE_ENV: "production" }),
+  ]);
+  assert.equal(dev.DOCS_ENABLED, true);
+  assert.equal(prod.DOCS_ENABLED, false);
+});
+
+test("an explicit DOCS_ENABLED wins over NODE_ENV", async () => {
+  const cases: [string, string | undefined, boolean][] = [
+    ["true", "production", true],
+    ["1", "production", true],
+    ["yes", "production", true],
+    ["false", undefined, false],
+    ["FALSE", "development", false],
+    ["0", undefined, false],
+    ["nope", undefined, false],
+  ];
+  const results = await Promise.all(
+    cases.map(([value, nodeEnv]) => assertAccepted({ DOCS_ENABLED: value, NODE_ENV: nodeEnv })),
+  );
+  results.forEach((settings, i) =>
+    assert.equal(settings.DOCS_ENABLED, cases[i][2], `DOCS_ENABLED=${cases[i][0]} NODE_ENV=${cases[i][1]}`),
+  );
 });
