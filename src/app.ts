@@ -5,6 +5,7 @@ import { json, notFound } from "./lib/http";
 import { HttpError } from "./lib/httpErrors";
 import { handleAuth } from "./modules/auth/routes";
 import { handleDocs } from "./modules/docs/routes";
+import { handleHome } from "./modules/home/routes";
 import { handleMedia } from "./modules/media/routes";
 import { handleNews } from "./modules/news/routes";
 import { applyCors } from "./plugins/cors";
@@ -64,6 +65,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
   if (await handleAuth(req, res, pathname)) return;
   if (await handleMedia(req, res, url, parts)) return;
   if (await handleNews(req, res, url, parts)) return;
+  if (await handleHome(req, res, url, parts)) return;
 
   notFound(res);
 }
