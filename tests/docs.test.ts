@@ -1,4 +1,4 @@
-import { after, before, test } from "node:test";
+import { after, before, mock, test } from "node:test";
 import assert from "node:assert/strict";
 import http from "node:http";
 import type { IncomingMessage, ServerResponse } from "node:http";
@@ -10,7 +10,10 @@ import SwaggerParser from "@apidevtools/swagger-parser";
 
 import { openApiSpec } from "../src/modules/docs/openapi";
 import { handleDocs } from "../src/modules/docs/routes";
-import { closeDb, resetDb, startTestServer, type Requester } from "./helpers/app";
+import { newObjectKey } from "../src/modules/media/service";
+import { prisma } from "../src/plugins/prisma";
+import { closeDb, resetDb, startTestServer, type Requester, type TestResponse } from "./helpers/app";
+import { ADMIN_EMAIL, ADMIN_PASSWORD, loginAsAdmin, refreshPair } from "./helpers/auth";
 
 let request: Requester;
 let close: () => Promise<void>;
@@ -161,6 +164,74 @@ test("every operation is complete and every admin route is guarded in the docume
     bearerFormat: "JWT",
     description: openApiSpec.components.securitySchemes.bearerAuth.description,
   });
+});
+
+/** Follows a local $ref (#/components/...) in the document. */
+function resolved(node: any): any {
+  let current = node;
+  while (current && typeof current.$ref === "string") {
+    current = current.$ref
+      .replace(/^#\//, "")
+      .split("/")
+      .reduce((value: any, key: string) => value?.[key], openApiSpec);
+  }
+  return current;
+}
+
+test("the list filters are not prefilled: no example or default on category and status", () => {
+  const checked: string[] = [];
+  for (const { key, op } of operationsOf(openApiSpec)) {
+    for (const entry of op.parameters ?? []) {
+      const parameter = resolved(entry);
+      if (parameter.in !== "query" || !["category", "status"].includes(parameter.name)) continue;
+      checked.push(`${key} ${parameter.name}`);
+
+      // Swagger UI pre-selects an example or a default of the parameter or of its schema, so Execute would send it.
+      const schema = resolved(parameter.schema);
+      const nodes: [string, any][] = [
+        ["parameter", parameter],
+        ["schema", schema],
+        ...((schema.allOf ?? []) as any[]).map((member): [string, any] => ["schema member", resolved(member)]),
+      ];
+      for (const [label, node] of nodes) {
+        for (const keyword of ["example", "examples", "default"]) {
+          assert.equal(node[keyword], undefined, `${key}: the ${label} of ${parameter.name} has ${keyword}`);
+        }
+      }
+    }
+  }
+  assert.deepEqual(checked.sort(), [
+    "GET /api/admin/news category",
+    "GET /api/admin/news status",
+    "GET /api/public/news category",
+  ]);
+
+  // The paging parameters keep their documented defaults.
+  const limit = openApiSpec.paths["/api/public/news"].get.parameters.find((p: any) => p.name === "limit");
+  assert.equal(resolved(limit).schema.default, 12);
+  assert.equal(resolved(openApiSpec.components.parameters.Page).schema.default, 1);
+});
+
+test("the news request examples still carry a concrete category and status", () => {
+  const categories = openApiSpec.components.schemas.NewsCategory.enum as string[];
+  const statuses = openApiSpec.components.schemas.ContentStatus.enum as string[];
+  const content: any = openApiSpec.paths["/api/admin/news"].post.requestBody.content["application/json"];
+  const examples = content.examples;
+  assert.ok(categories.includes(examples.completa.value.category));
+  assert.ok(statuses.includes(examples.completa.value.status));
+  assert.ok(categories.includes(examples.minima.value.category));
+});
+
+test("every nullable schema declares its type, as OpenAPI 3.0.3 requires", () => {
+  const offenders: string[] = [];
+  const walk = (node: any, where: string) => {
+    if (Array.isArray(node)) return node.forEach((item, i) => walk(item, `${where}/${i}`));
+    if (!node || typeof node !== "object") return;
+    if (node.nullable === true && typeof node.type !== "string") offenders.push(where);
+    for (const [name, child] of Object.entries(node)) walk(child, `${where}/${name}`);
+  };
+  walk(openApiSpec, "#");
+  assert.deepEqual(offenders, []);
 });
 
 test("GET /docs and /docs/ serve the page, which loads its assets and has no inline script", async () => {
@@ -370,7 +441,9 @@ const BARE_REQUEST_STATUS: Record<string, number> = {
   "GET /api/public/news": 200,
 };
 
-test("every documented route exists on the server and the admin ones are guarded", async () => {
+// An additional guard only: the admin routers answer 401 before they look at the path, so this does not prove that a
+// route exists (the tests below do). It proves that none of the admin routes is open.
+test("every documented admin route is guarded and the open ones answer as documented", async () => {
   const uuid = "11111111-1111-4111-8111-111111111111";
 
   for (const { key, method, path: pathName, op } of operationsOf(openApiSpec)) {
@@ -393,4 +466,186 @@ test("every documented route exists on the server and the admin ones are guarded
       assert.deepEqual(res.json, { error: "Not found" });
     }
   }
+});
+
+/** The answer of a documented operation: never 405 or 500, and one of the statuses the document lists for it. */
+function assertDocumentedAnswer(key: string, op: any, status: number): void {
+  assert.ok(status !== 405 && status !== 500, `${key} answered ${status}`);
+  const documented = Object.keys(op.responses);
+  assert.ok(documented.includes(String(status)), `${key} answered ${status}, documented: ${documented.join(", ")}`);
+}
+
+type Context = { token: string; cookie: string; mediaId: string; newsId: string; slug: string };
+
+type Call = {
+  key: string;
+  /** The exact status of the happy path. */
+  status: number;
+  send: (request: Requester, ctx: Context) => Promise<TestResponse>;
+  then?: (res: TestResponse, ctx: Context) => void;
+  /** The best-effort delete of the stored file fails (there is no storage in tests) and logs a warning. */
+  logsWarning?: boolean;
+};
+
+// One real call for every documented operation, in an order that works: the logout and the deletes come last.
+const CALLS: Call[] = [
+  { key: "GET /api/health", status: 200, send: (r) => r("GET", "/api/health") },
+  {
+    key: "POST /api/admin/auth/login",
+    status: 200,
+    send: (r) => r("POST", "/api/admin/auth/login", { body: { email: ADMIN_EMAIL, password: ADMIN_PASSWORD } }),
+    then: (res, ctx) => {
+      ctx.cookie = refreshPair(res.setCookie);
+    },
+  },
+  {
+    key: "POST /api/admin/auth/refresh",
+    status: 200,
+    send: (r, ctx) => r("POST", "/api/admin/auth/refresh", { cookie: ctx.cookie }),
+    then: (res, ctx) => {
+      ctx.cookie = refreshPair(res.setCookie);
+      ctx.token = res.json.accessToken;
+    },
+  },
+  { key: "GET /api/admin/auth/me", status: 200, send: (r, ctx) => r("GET", "/api/admin/auth/me", { token: ctx.token }) },
+  {
+    key: "POST /api/admin/media/presign",
+    status: 200,
+    send: (r, ctx) =>
+      r("POST", "/api/admin/media/presign", {
+        token: ctx.token,
+        body: { contentType: "image/png", size: 1234, alt: "Veduta del porto" },
+      }),
+  },
+  { key: "GET /api/admin/media", status: 200, send: (r, ctx) => r("GET", "/api/admin/media", { token: ctx.token }) },
+  {
+    key: "PATCH /api/admin/media/{id}",
+    status: 200,
+    send: (r, ctx) => r("PATCH", `/api/admin/media/${ctx.mediaId}`, { token: ctx.token, body: { alt: "Il porto al tramonto" } }),
+  },
+  { key: "GET /api/admin/news", status: 200, send: (r, ctx) => r("GET", "/api/admin/news", { token: ctx.token }) },
+  {
+    key: "POST /api/admin/news",
+    status: 201,
+    send: (r, ctx) =>
+      r("POST", "/api/admin/news", {
+        token: ctx.token,
+        body: { title: "Creata dal test", date: "2026-10-02", category: "RICERCA", body: "Testo della news." },
+      }),
+  },
+  {
+    key: "GET /api/admin/news/{id}",
+    status: 200,
+    send: (r, ctx) => r("GET", `/api/admin/news/${ctx.newsId}`, { token: ctx.token }),
+    then: (res, ctx) => assert.equal(res.json.slug, ctx.slug),
+  },
+  {
+    key: "PATCH /api/admin/news/{id}",
+    status: 200,
+    send: (r, ctx) => r("PATCH", `/api/admin/news/${ctx.newsId}`, { token: ctx.token, body: { title: "Titolo modificato" } }),
+  },
+  {
+    key: "GET /api/public/news",
+    status: 200,
+    send: (r) => r("GET", "/api/public/news"),
+    then: (res, ctx) => assert.ok(res.json.items.some((item: { slug: string }) => item.slug === ctx.slug)),
+  },
+  {
+    key: "GET /api/public/news/{slug}",
+    status: 200,
+    send: (r, ctx) => r("GET", `/api/public/news/${ctx.slug}`),
+  },
+  { key: "POST /api/admin/auth/logout", status: 204, send: (r, ctx) => r("POST", "/api/admin/auth/logout", { cookie: ctx.cookie }) },
+  {
+    key: "DELETE /api/admin/news/{id}",
+    status: 204,
+    send: (r, ctx) => r("DELETE", `/api/admin/news/${ctx.newsId}`, { token: ctx.token }),
+  },
+  {
+    key: "DELETE /api/admin/media/{id}",
+    status: 204,
+    send: (r, ctx) => r("DELETE", `/api/admin/media/${ctx.mediaId}`, { token: ctx.token }),
+    logsWarning: true,
+  },
+];
+
+test("every documented operation answers on the real router with a status the document lists", async () => {
+  await resetDb();
+  const { token, cookie } = await loginAsAdmin(request);
+  const media = await prisma.media.create({
+    data: { bucket: "mateira-media", objectKey: newObjectKey("image/png"), mimeType: "image/png", size: 1234, alt: "Veduta del porto" },
+  });
+  const news = await prisma.news.create({
+    data: {
+      slug: "notizia-di-prova",
+      title: "Notizia di prova",
+      date: new Date("2026-10-01T09:00:00Z"),
+      category: "MATEIRA",
+      body: "Testo della notizia di prova.",
+      status: "PUBLISHED",
+      publishedAt: new Date("2026-10-01T09:00:00Z"),
+      imageId: media.id,
+    },
+  });
+  const ctx: Context = { token, cookie, mediaId: media.id, newsId: news.id, slug: news.slug };
+
+  const documented = new Map(operationsOf(openApiSpec).map((o) => [o.key, o.op]));
+  assert.deepEqual(CALLS.map((call) => call.key).sort(), [...documented.keys()].sort(), "one call for every documented operation");
+
+  for (const call of CALLS) {
+    // Only the call known to log gets its warning silenced: any other output stays visible.
+    const warn = call.logsWarning ? mock.method(console, "warn", () => {}) : null;
+    let res: TestResponse;
+    try {
+      res = await call.send(request, ctx);
+    } finally {
+      warn?.mock.restore();
+    }
+    assertDocumentedAnswer(call.key, documented.get(call.key), res.status);
+    assert.equal(res.status, call.status, `${call.key}: ${JSON.stringify(res.json)}`);
+    call.then?.(res, ctx);
+  }
+});
+
+test("an unknown id or slug answers 404 on every route that takes one", async () => {
+  const { token } = await loginAsAdmin(request);
+  const unknownId = "22222222-2222-4222-8222-222222222222";
+  let checked = 0;
+
+  for (const { key, method, path: pathName, op } of operationsOf(openApiSpec)) {
+    if (!/\{(id|slug)\}/.test(pathName)) continue;
+    const url = pathName.replace("{id}", unknownId).replace("{slug}", "no-such-slug");
+    const body = method === "PATCH" ? (pathName.includes("/media/") ? { alt: "Testo" } : { title: "Titolo" }) : undefined;
+    const res = await request(method, url, { token, body });
+    assertDocumentedAnswer(key, op, res.status);
+    assert.equal(res.status, 404, key);
+    assert.deepEqual(res.json, { error: "Not found" }, key);
+    checked++;
+  }
+  assert.equal(checked, 6);
+});
+
+test("the check can fail: a route that does not exist answers 404 and is not in the document", async () => {
+  const { token } = await loginAsAdmin(request);
+  const documented = new Map(operationsOf(openApiSpec).map((o) => [o.key, o.op]));
+  const uuid = "11111111-1111-4111-8111-111111111111";
+
+  // With a token the missing routes fall through to the 404 of the app...
+  const put = await request("PUT", "/api/admin/news", { token, body: {} });
+  const deeper = await request("GET", `/api/admin/news/${uuid}/deeper`, { token });
+  assert.equal(put.status, 404);
+  assert.equal(deeper.status, 404);
+  assert.ok(!documented.has("PUT /api/admin/news"));
+  assert.ok(![...documented.keys()].some((key) => key.includes("/deeper")));
+
+  // ...and that answer is refused for an operation that lists no 404, which is how a vanished route would show.
+  const list = documented.get("GET /api/admin/news");
+  assert.equal(list.responses["404"], undefined);
+  assert.throws(() => assertDocumentedAnswer("GET /api/admin/news", list, put.status));
+  assert.throws(() => assertDocumentedAnswer("GET /api/admin/news", list, 405));
+  assert.throws(() => assertDocumentedAnswer("GET /api/admin/news", list, 500));
+
+  // Without a token the same missing routes answer 401: the unauthenticated check cannot tell them from real ones.
+  assert.equal((await request("PUT", "/api/admin/news")).status, 401);
+  assert.equal((await request("GET", `/api/admin/news/${uuid}/deeper`)).status, 401);
 });

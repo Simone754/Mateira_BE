@@ -4,7 +4,7 @@ Backend REST del sito Mateira: autenticazione del superuser, gestione dei media 
 
 ## Requisiti
 
-- Node.js 22 o superiore (`engines` in `package.json`; sviluppato con Node 24).
+- Node.js 22.19 o superiore (`engines` in `package.json`; sviluppato con Node 24). Il minimo viene da `@apidevtools/swagger-parser`, usato nei test.
 - Docker, per il PostgreSQL 16 locale definito in `docker-compose.yml`.
 - Solo per provare gli upload in locale: un server compatibile con l'API S3 (per esempio MinIO) all'indirizzo di `MEDIA_ENDPOINT`. Non è incluso in `docker-compose.yml`. Senza, tutte le altre API funzionano: l'URL firmato viene calcolato senza contattare lo storage, ma il caricamento del file e la cancellazione dell'oggetto no (la cancellazione scrive un avviso nel log e la riga del database viene comunque eliminata).
 
@@ -118,14 +118,14 @@ Con il server in esecuzione:
 
 Per provare le rotte admin bastano due passi:
 
-1. Apri `/docs`, espandi `POST /api/admin/auth/login`, premi *Try it out*, inserisci email e password del superuser (quelle di `SUPERUSER_EMAIL` e `SUPERUSER_PASSWORD` usate dal seed) ed esegui.
-2. Il token di accesso viene applicato da solo al lucchetto *Authorize*, che si chiude: da quel momento ogni rotta con il lucchetto si prova con *Try it out*, per esempio `GET /api/admin/auth/me`. Non serve copiare il token.
+1. Apri `/docs`, espandi `POST /api/admin/auth/login`, inserisci email e password del superuser (quelle di `SUPERUSER_EMAIL` e `SUPERUSER_PASSWORD` usate dal seed) e premi *Execute*.
+2. Il token di accesso viene applicato da solo al lucchetto *Authorize*, che si chiude: da quel momento ogni rotta con il lucchetto si prova con *Execute*, per esempio `GET /api/admin/auth/me`. Non serve copiare il token.
 
 Il token dura `JWT_EXPIRES_IN`. `POST /api/admin/auth/refresh` ne ottiene uno nuovo (e lo applica da solo) e `POST /api/admin/auth/logout` chiude la sessione. Entrambe usano il cookie `mateira_refresh` (HttpOnly), che Swagger UI non può leggere né impostare: lo invia il browser da solo, perché `/docs` è servita dalla stessa origine dell'API. In sviluppo su http serve `COOKIE_SECURE=false`.
 
 Le pagine `/docs` e `/openapi.json` sono pubbliche: descrivono l'API ma non danno accesso ai dati. Per questo `DOCS_ENABLED` è attivo di default tranne in produzione. Il default in produzione vale solo se il processo ha `NODE_ENV=production` (`npm start` non lo imposta da solo): impostalo nell'ambiente di deploy oppure metti `DOCS_ENABLED=false`. Con la documentazione spenta le due pagine rispondono 404.
 
-**Regola per i nuovi moduli.** Ogni nuovo endpoint va descritto in `src/modules/docs/openapi.ts` (percorso, parametri, body con esempio, tutti gli status e gli schemi) e aggiunto all'elenco `ROUTES` di `tests/docs.test.ts`. I test controllano che il documento sia valido, che ogni rotta documentata esista e che quelle admin rispondano 401 senza token, ma non possono accorgersi di una rotta che nessuno ha documentato.
+**Regola per i nuovi moduli.** Ogni nuovo endpoint va descritto in `src/modules/docs/openapi.ts` (percorso, parametri, body con esempio, tutti gli status e gli schemi) e aggiunto all'elenco `ROUTES` e alle chiamate `CALLS` di `tests/docs.test.ts`. I test controllano che il documento sia valido, che ogni operazione documentata, chiamata sul router vero con un token e id reali, risponda con uno degli status elencati (mai 404 con id reali, 405 o 500), che gli id sconosciuti diano 404 e che le rotte admin rispondano 401 senza token. Non possono accorgersi di una rotta che nessuno ha documentato.
 
 ## Checklist di deploy
 

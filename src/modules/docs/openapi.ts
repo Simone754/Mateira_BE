@@ -2,7 +2,8 @@
  * OpenAPI description of the whole API, served at /openapi.json and shown by Swagger UI at /docs.
  *
  * It is written by hand, so it must be updated together with the routes: every new endpoint goes here
- * (tests/docs.test.ts fails when a documented route stops working, but cannot notice a route nobody documented).
+ * (tests/docs.test.ts calls every documented operation on the real router and fails when one stops answering with a
+ * status listed here, but it cannot notice a route nobody documented).
  * Technical names, enums and error strings follow the code; descriptions are in Italian.
  */
 
@@ -103,7 +104,7 @@ export const openApiSpec = {
       "",
       "## Come autenticarsi",
       "",
-      "1. Apri `POST /api/admin/auth/login`, premi *Try it out*, inserisci email e password del superuser ed esegui. " +
+      "1. Apri `POST /api/admin/auth/login`, inserisci email e password del superuser e premi *Execute*. " +
         "Il token di accesso viene applicato da solo al lucchetto *Authorize* (lo vedrai chiuso).",
       "2. Prova qualsiasi rotta con il lucchetto, per esempio `GET /api/admin/auth/me`.",
       "",
@@ -719,14 +720,13 @@ export const openApiSpec = {
           "PRESS",
           "COMUNICATI",
         ],
+        // No example or default here: the schema also types the list filters, and Swagger UI would send it.
         description: "Categoria della news.",
-        example: "RICERCA",
       },
       ContentStatus: {
         type: "string",
         enum: ["DRAFT", "PUBLISHED"],
         description: "`DRAFT` è visibile solo all'amministratore, `PUBLISHED` anche al pubblico.",
-        example: "DRAFT",
       },
       ExternalLink: {
         type: "object",
@@ -756,7 +756,7 @@ export const openApiSpec = {
           category: ref("NewsCategory"),
           excerpt: { type: "string", description: "Inizio del testo, al massimo 220 caratteri, su una riga.", example: "Primo paragrafo della news." },
           author: { type: "string", nullable: true, example: "Redazione Mateira" },
-          image: { allOf: [ref("MediaRef")], nullable: true, description: "Immagine di copertina, se c'è." },
+          image: { type: "object", allOf: [ref("MediaRef")], nullable: true, description: "Immagine di copertina, se c'è." },
           publishedAt: { type: "string", format: "date-time", nullable: true, description: "Quando la news è stata pubblicata per la prima volta." },
         },
       },
