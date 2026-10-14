@@ -24,7 +24,7 @@ import {
 import { httpError } from "../../lib/httpErrors";
 import { createRateLimiter } from "../../lib/rateLimit";
 import { asObject, reqString } from "../../lib/validate";
-import { requireAdmin } from "../../middlewares/requireAdmin";
+import { type AdminSession, hasSession } from "../../middlewares/adminGuard";
 import { signJwt } from "../../plugins/jwt";
 import { prisma } from "../../plugins/prisma";
 import { AuthResponse } from "./dto";
@@ -71,7 +71,12 @@ function accessResponse(user: User): AuthResponse {
   };
 }
 
-export async function handleAuth(req: IncomingMessage, res: ServerResponse, pathname: string): Promise<boolean> {
+export async function handleAuth(
+  req: IncomingMessage,
+  res: ServerResponse,
+  pathname: string,
+  session: AdminSession | null,
+): Promise<boolean> {
   if (!pathname.startsWith("/api/admin/auth/")) return false;
 
   if (req.method === "POST" && pathname === "/api/admin/auth/login") {
@@ -141,8 +146,7 @@ export async function handleAuth(req: IncomingMessage, res: ServerResponse, path
   }
 
   if (req.method === "GET" && pathname === "/api/admin/auth/me") {
-    const session = await requireAdmin(req, res);
-    if (!session) return true;
+    if (!hasSession(res, session)) return true;
     json(res, 200, { user: serializeUser(session.user) });
     return true;
   }

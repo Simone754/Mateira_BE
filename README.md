@@ -84,7 +84,7 @@ Se `MEDIA_ENDPOINT`, `MEDIA_ACCESS_KEY`, `MEDIA_SECRET_KEY` o `MEDIA_BUCKET` man
 
 ## API
 
-Gli errori sono JSON nella forma `{ "error": "..." }`. Le risposte sotto `/api/admin` hanno `Cache-Control: no-store`. Le rotte admin, escluse `login`, `refresh` e `logout`, richiedono l'header `Authorization: Bearer <accessToken>`.
+Gli errori sono JSON nella forma `{ "error": "..." }`. Le risposte sotto `/api/admin` hanno `Cache-Control: no-store`. Le rotte admin, escluse `login`, `refresh` e `logout`, richiedono l'header `Authorization: Bearer <accessToken>`. Il controllo è unico, in `src/app.ts`, e copre ogni percorso sotto `/api/admin/`: senza token anche un percorso che non esiste risponde 401.
 
 | Metodo e percorso | Descrizione |
 | --- | --- |
@@ -145,7 +145,7 @@ Il token dura `JWT_EXPIRES_IN`. `POST /api/admin/auth/refresh` ne ottiene uno nu
 
 Le pagine `/docs` e `/openapi.json` sono pubbliche: descrivono l'API ma non danno accesso ai dati. Per questo `DOCS_ENABLED` è attivo di default tranne in produzione. Il default in produzione vale solo se il processo ha `NODE_ENV=production` (`npm start` non lo imposta da solo): impostalo nell'ambiente di deploy oppure metti `DOCS_ENABLED=false`. Con la documentazione spenta le due pagine rispondono 404.
 
-**Regola per i nuovi moduli.** Ogni nuovo endpoint va descritto in `src/modules/docs/openapi.ts` (percorso, parametri, body con esempio, tutti gli status e gli schemi) e aggiunto all'elenco `ROUTES` e alle chiamate `CALLS` di `tests/docs.test.ts`. I test controllano che il documento sia valido, che ogni operazione documentata, chiamata sul router vero con un token e id reali, risponda con uno degli status elencati (mai 404 con id reali, 405 o 500), che gli id sconosciuti diano 404 e che le rotte admin rispondano 401 senza token. Non possono accorgersi di una rotta che nessuno ha documentato.
+**Regola per i nuovi moduli.** Ogni nuovo endpoint va descritto in `src/modules/docs/openapi.ts` (percorso, parametri, body con esempio, tutti gli status e gli schemi) e aggiunto all'elenco `ROUTES` e alle chiamate `CALLS` di `tests/docs.test.ts`. I test controllano che il documento sia valido, che ogni operazione documentata, chiamata sul router vero con un token e id reali, risponda con uno degli status elencati (mai 404 con id reali, 405 o 500), che gli id sconosciuti diano 404 e che le rotte admin rispondano 401 senza token. Non possono accorgersi di una rotta che nessuno ha documentato. Un nuovo router admin non verifica il token da solo: riceve la sessione già verificata da `src/app.ts` come ultimo parametro e la controlla con `hasSession(res, session)`.
 
 ## Checklist di deploy
 

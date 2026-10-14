@@ -7,7 +7,7 @@ import { httpError } from "../../lib/httpErrors";
 import { parseLimit, parsePage } from "../../lib/parse";
 import { isPrismaError } from "../../lib/prismaErrors";
 import { asObject, isUuid, optString, reqString } from "../../lib/validate";
-import { requireAdmin } from "../../middlewares/requireAdmin";
+import { type AdminSession, hasSession } from "../../middlewares/adminGuard";
 import { createPresignedUpload, deleteMediaObject, isMediaConfigured } from "../../plugins/media";
 import { prisma } from "../../plugins/prisma";
 import { PresignResponse } from "./dto";
@@ -20,11 +20,11 @@ export async function handleMedia(
   res: ServerResponse,
   url: URL,
   parts: string[],
+  session: AdminSession | null,
 ): Promise<boolean> {
   if (parts[0] !== "api" || parts[1] !== "admin" || parts[2] !== "media") return false;
 
-  const session = await requireAdmin(req, res);
-  if (!session) return true;
+  if (!hasSession(res, session)) return true;
 
   if (req.method === "POST" && parts.length === 4 && parts[3] === "presign") {
     if (!isMediaConfigured()) throw httpError(503, "media storage not configured");

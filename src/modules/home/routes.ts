@@ -7,7 +7,7 @@ import { empty, json, notFound, readJson } from "../../lib/http";
 import { httpError } from "../../lib/httpErrors";
 import { isPrismaError } from "../../lib/prismaErrors";
 import { asObject, isUuid, optEnum, reqEnum } from "../../lib/validate";
-import { requireAdmin } from "../../middlewares/requireAdmin";
+import { type AdminSession, hasSession } from "../../middlewares/adminGuard";
 import { prisma } from "../../plugins/prisma";
 import { CONTENT_STATUSES, HOME_BLOCK_TYPES } from "./dto";
 import {
@@ -28,11 +28,12 @@ export async function handleHome(
   res: ServerResponse,
   _url: URL,
   parts: string[],
+  session: AdminSession | null,
 ): Promise<boolean> {
   if (parts[0] !== "api") return false;
 
   if (parts[1] === "public" && parts[2] === "home") return handlePublic(req, res, parts);
-  if (parts[1] === "admin" && parts[2] === "home-blocks") return handleAdmin(req, res, parts);
+  if (parts[1] === "admin" && parts[2] === "home-blocks") return handleAdmin(req, res, parts, session);
   return false;
 }
 
@@ -52,10 +53,14 @@ async function sendAdminList(res: ServerResponse): Promise<void> {
   json(res, 200, { blocks: rows.map((row) => serializeAdmin(row, images)) });
 }
 
-async function handleAdmin(req: IncomingMessage, res: ServerResponse, parts: string[]): Promise<boolean> {
+async function handleAdmin(
+  req: IncomingMessage,
+  res: ServerResponse,
+  parts: string[],
+  session: AdminSession | null,
+): Promise<boolean> {
   // Before anything else, and for every path under the prefix: an unknown path must not answer differently.
-  const session = await requireAdmin(req, res);
-  if (!session) return true;
+  if (!hasSession(res, session)) return true;
 
   if (parts.length === 3 && req.method === "GET") {
     await sendAdminList(res);

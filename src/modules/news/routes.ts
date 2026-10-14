@@ -8,7 +8,7 @@ import { httpError } from "../../lib/httpErrors";
 import { parseLimit, parsePage } from "../../lib/parse";
 import { isPrismaError } from "../../lib/prismaErrors";
 import { asObject, isUuid, optEnum } from "../../lib/validate";
-import { requireAdmin } from "../../middlewares/requireAdmin";
+import { type AdminSession, hasSession } from "../../middlewares/adminGuard";
 import { prisma } from "../../plugins/prisma";
 import { CONTENT_STATUSES, NEWS_CATEGORIES } from "./dto";
 import {
@@ -57,11 +57,12 @@ export async function handleNews(
   res: ServerResponse,
   url: URL,
   parts: string[],
+  session: AdminSession | null,
 ): Promise<boolean> {
   if (parts[0] !== "api" || parts[2] !== "news") return false;
 
   if (parts[1] === "public") return handlePublic(req, res, url, parts);
-  if (parts[1] === "admin") return handleAdmin(req, res, url, parts);
+  if (parts[1] === "admin") return handleAdmin(req, res, url, parts, session);
   return false;
 }
 
@@ -99,9 +100,14 @@ async function handlePublic(req: IncomingMessage, res: ServerResponse, url: URL,
   return false;
 }
 
-async function handleAdmin(req: IncomingMessage, res: ServerResponse, url: URL, parts: string[]): Promise<boolean> {
-  const session = await requireAdmin(req, res);
-  if (!session) return true;
+async function handleAdmin(
+  req: IncomingMessage,
+  res: ServerResponse,
+  url: URL,
+  parts: string[],
+  session: AdminSession | null,
+): Promise<boolean> {
+  if (!hasSession(res, session)) return true;
 
   if (parts.length === 3 && req.method === "GET") {
     const query = Object.fromEntries(url.searchParams);

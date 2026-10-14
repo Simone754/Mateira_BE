@@ -3,6 +3,8 @@ import { URL } from "node:url";
 
 import { json, notFound } from "./lib/http";
 import { HttpError } from "./lib/httpErrors";
+import { isGuardedAdminRequest } from "./middlewares/adminGuard";
+import { type AdminSession, requireAdmin } from "./middlewares/requireAdmin";
 import { handleAuth } from "./modules/auth/routes";
 import { handleDocs } from "./modules/docs/routes";
 import { handleHome } from "./modules/home/routes";
@@ -46,7 +48,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
   const pathname = url.pathname;
   const parts = pathname.split("/").filter(Boolean);
 
-  if (pathname.startsWith("/api/admin")) {
+  if (parts[0] === "api" && parts[1] === "admin") {
     res.setHeader("Cache-Control", "no-store");
   }
 
@@ -62,10 +64,18 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
 
   // Documentation lives outside /api (/docs, /openapi.json): it needs no token.
   if (await handleDocs(req, res, pathname)) return;
-  if (await handleAuth(req, res, pathname)) return;
-  if (await handleMedia(req, res, url, parts)) return;
-  if (await handleNews(req, res, url, parts)) return;
-  if (await handleHome(req, res, url, parts)) return;
+
+  // One check for the whole admin area, on the same parts the routers match: they get the verified session.
+  let session: AdminSession | null = null;
+  if (isGuardedAdminRequest(req.method, parts)) {
+    session = await requireAdmin(req, res);
+    if (!session) return;
+  }
+
+  if (await handleAuth(req, res, pathname, session)) return;
+  if (await handleMedia(req, res, url, parts, session)) return;
+  if (await handleNews(req, res, url, parts, session)) return;
+  if (await handleHome(req, res, url, parts, session)) return;
 
   notFound(res);
 }
