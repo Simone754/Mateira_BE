@@ -40,6 +40,8 @@ const limitParameter = (defaultValue: number, max: number) => ({
 
 const MEDIA_ID = "3f2b8c1e-5d4a-4e7b-9a60-1c2d3e4f5a6b";
 const NEWS_ID = "7c9e6679-7425-40de-944b-e07fc1f90ae7";
+const BLOCK_ID = "b5f1c0de-2a7e-4c3b-8d19-6e0a4f7c2d38";
+const OTHER_BLOCK_ID = "0b1f6a52-8c3d-4d5e-b7a1-2e9f4c6d8a10";
 const DATE_PATTERN = "^\\d{4}-\\d{2}-\\d{2}(T\\d{2}:\\d{2}(:\\d{2}(\\.\\d{1,9})?)?(Z|[+-]\\d{2}:\\d{2})?)?$";
 
 const refreshCookieNote =
@@ -94,13 +96,130 @@ const newsWritableProperties = {
   status: { allOf: [ref("ContentStatus")], description: "Stato di pubblicazione. Se manca, una nuova news è `DRAFT`." },
 };
 
+/** The rules of a link, repeated in every field that holds one. */
+const HREF_RULES =
+  "Percorso interno che inizia con una sola `/` (per esempio `/come-lavoriamo`, senza spazi, al massimo 300 caratteri) " +
+  "oppure indirizzo `http` o `https` valido (al massimo 500 caratteri), che viene normalizzato. " +
+  "Sono rifiutati `javascript:`, `data:`, `mailto:`, gli indirizzi che iniziano con `//` e quelli con spazi o backslash.";
+
+const hrefProperty = (description: string, extra: object = {}) => ({
+  type: "string",
+  maxLength: 500,
+  description: `${description} ${HREF_RULES}`,
+  example: "/come-lavoriamo",
+  ...extra,
+});
+
+const homeContentRules = [
+  "Tipi di blocco e campi di `content` (un campo non previsto per il tipo è rifiutato con 400 e il messaggio ne indica il nome):",
+  "",
+  "| Tipo | Campi |",
+  "| --- | --- |",
+  "| `HERO` | `title` (obbligatorio, max 200), `text` (max 600), `primaryCta` (obbligatorio), `secondaryCta` |",
+  "| `TICKER` | `items`: da 1 a 10 elementi `{ text (max 160), href }`, `href` facoltativo |",
+  "| `CTA` | `title` (obbligatorio, max 200), `text` (max 400), `cta` (obbligatorio) |",
+  "| `FEATURED` | `title` (obbligatorio, max 120), `items`: da 1 a 6 schede `{ title (max 160), text (max 300), href, imageId }`, `href` obbligatorio |",
+  "",
+  "`primaryCta`, `secondaryCta` e `cta` hanno la forma `{ label (obbligatorio, max 60), href }`. " +
+    'Le stringhe vengono ripulite dagli spazi ai bordi; un testo facoltativo vuoto o `null` vale "assente" e viene salvato come `null`. ' +
+    "`imageId` deve essere l'id di un media esistente che sia un'immagine (non un PDF).",
+].join("\n");
+
+const homeCreateExamples = {
+  hero: {
+    summary: "Blocco HERO",
+    value: {
+      type: "HERO",
+      content: {
+        title: "Un'idea di sapere condiviso",
+        text: "Ricerca, programmi e viaggi per capire il presente.",
+        primaryCta: { label: "Scopri come lavoriamo", href: "/come-lavoriamo" },
+        secondaryCta: { label: "Leggi le news", href: "/news" },
+      },
+      status: "PUBLISHED",
+    },
+  },
+  ticker: {
+    summary: "Blocco TICKER",
+    value: {
+      type: "TICKER",
+      content: {
+        items: [
+          { text: "Aperte le iscrizioni al laboratorio di autunno", href: "/news/laboratorio-autunno" },
+          { text: "Nuovo bando di ricerca in uscita" },
+          { text: "Seguici sul sito del progetto", href: "https://www.example.org/progetto" },
+        ],
+      },
+    },
+  },
+  cta: {
+    summary: "Blocco CTA",
+    value: {
+      type: "CTA",
+      content: {
+        title: "Sostieni il progetto",
+        text: "Ogni contributo conta.",
+        cta: { label: "Dona ora", href: "https://example.org/dona" },
+      },
+    },
+  },
+  featured: {
+    summary: "Blocco FEATURED con un'immagine",
+    value: {
+      type: "FEATURED",
+      content: {
+        title: "In evidenza",
+        items: [
+          {
+            title: "Nuovo laboratorio di ricerca",
+            text: "Aperte le iscrizioni.",
+            href: "/news/nuovo-laboratorio-di-ricerca",
+            imageId: MEDIA_ID,
+          },
+          { title: "Il programma di autunno", href: "/programmi" },
+        ],
+      },
+    },
+  },
+};
+
+const homePublicExample = {
+  blocks: [
+    {
+      id: BLOCK_ID,
+      type: "CTA",
+      content: { title: "Sostieni il progetto", text: null, cta: { label: "Dona ora", href: "https://example.org/dona" } },
+    },
+    {
+      id: OTHER_BLOCK_ID,
+      type: "FEATURED",
+      content: {
+        title: "In evidenza",
+        items: [
+          {
+            title: "Nuovo laboratorio di ricerca",
+            text: "Aperte le iscrizioni.",
+            href: "/news/nuovo-laboratorio-di-ricerca",
+            image: {
+              id: MEDIA_ID,
+              url: `http://localhost:9100/mateira-media/media/2026/${MEDIA_ID}.jpg`,
+              alt: "Il laboratorio Mateira visto dall'alto",
+            },
+          },
+          { title: "Il programma di autunno", text: null, href: "/programmi", image: null },
+        ],
+      },
+    },
+  ],
+};
+
 export const openApiSpec = {
   openapi: "3.0.3",
   info: {
     title: "Mateira API",
     version: "1.0.0",
     description: [
-      "API del backend di **Mateira**: news pubbliche, media e area riservata al superuser.",
+      "API del backend di **Mateira**: news e blocchi della Home pubblici, media e area riservata al superuser.",
       "",
       "## Come autenticarsi",
       "",
@@ -127,6 +246,12 @@ export const openApiSpec = {
     { name: "Media", description: "Immagini e PDF, solo per l'amministratore. Il file viene caricato direttamente sullo storage." },
     { name: "News (admin)", description: "Gestione completa delle news, bozze comprese. Richiede il token." },
     { name: "News (pubbliche)", description: "Le sole news pubblicate, senza autenticazione." },
+    {
+      name: "Home (admin)",
+      description:
+        "Blocchi della Home (hero, ticker, inviti all'azione, schede in evidenza): crea, modifica, riordina, nascondi (bozza) e cancella. Richiede il token.",
+    },
+    { name: "Home (pubblica)", description: "I blocchi pubblicati della Home, già in ordine, senza autenticazione." },
   ],
   paths: {
     "/api/health": {
@@ -528,6 +653,183 @@ export const openApiSpec = {
         },
       },
     },
+
+    "/api/public/home": {
+      get: {
+        tags: ["Home (pubblica)"],
+        operationId: "getHomePublic",
+        summary: "Blocchi pubblicati della Home",
+        description:
+          "Solo i blocchi `PUBLISHED`, già in ordine (posizione, poi data di creazione, poi id). " +
+          "Ogni blocco è `{ id, type, content }`: nessun campo amministrativo (stato, posizione, date). " +
+          "Nel `content` dei blocchi `FEATURED` ogni scheda ha `image` (`id`, `url`, `alt`) al posto di `imageId`; " +
+          "`image` è `null` se la scheda non ha immagine o se il media è stato cancellato. " +
+          "Senza blocchi pubblicati `blocks` è una lista vuota. I testi facoltativi assenti sono `null`.",
+        responses: {
+          "200": {
+            description: "I blocchi pubblicati, in ordine.",
+            content: json(ref("HomePublicResponse"), { example: homePublicExample }),
+          },
+        },
+      },
+    },
+
+    "/api/admin/home-blocks": {
+      get: {
+        tags: ["Home (admin)"],
+        operationId: "listHomeBlocks",
+        summary: "Elenco dei blocchi della Home",
+        description:
+          "Tutti i blocchi, bozze comprese, in ordine (posizione, poi data di creazione, poi id), con stato, posizione e date. " +
+          "Nelle schede `FEATURED` l'immagine è risolta in `image`, come nella risposta pubblica; per riscrivere una scheda l'id del media è in `image.id`.",
+        security: bearer,
+        responses: {
+          "200": { description: "I blocchi, in ordine.", content: json(ref("HomeBlockList")) },
+          "401": response("Unauthorized"),
+        },
+      },
+      post: {
+        tags: ["Home (admin)"],
+        operationId: "createHomeBlock",
+        summary: "Crea un blocco della Home",
+        description: [
+          "Crea un blocco in fondo alla Home (`position` = massimo attuale più uno), per default in bozza (`DRAFT`). " +
+            "Con `status` `PUBLISHED` il blocco è subito pubblico e `publishedAt` è l'ora attuale. " +
+            "Nel body sono ammessi solo `type`, `content` e `status`; il tipo non cambia più dopo la creazione.",
+          "",
+          homeContentRules,
+          "",
+          "Due creazioni simultanee possono avere la stessa posizione: l'ordine di lettura resta stabile (data di creazione, poi id).",
+        ].join("\n"),
+        security: bearer,
+        requestBody: {
+          required: true,
+          content: json(ref("HomeBlockCreateRequest"), { examples: homeCreateExamples }),
+        },
+        responses: {
+          "201": { description: "Blocco creato.", content: json(ref("HomeBlockAdmin")) },
+          "400": errorResponse(
+            "Body non valido: tipo o stato non ammessi, campo mancante, fuori limite o non previsto per il tipo, link non valido, " +
+              "oppure `imageId` che non è un media esistente o non è un'immagine.",
+            'content.primaryCta.href must be a path starting with a single "/" or an http(s) address',
+          ),
+          "401": response("Unauthorized"),
+          "413": response("PayloadTooLarge"),
+        },
+      },
+    },
+
+    "/api/admin/home-blocks/order": {
+      put: {
+        tags: ["Home (admin)"],
+        operationId: "reorderHomeBlocks",
+        summary: "Riordina i blocchi della Home",
+        description:
+          "`ids` deve contenere esattamente tutti gli id dei blocchi esistenti (bozze comprese), ciascuno una volta, nell'ordine voluto. " +
+          "Le posizioni vengono riscritte come 0, 1, 2... in una sola transazione e la risposta è l'elenco aggiornato. " +
+          "Con un id mancante, sconosciuto, ripetuto o non valido la risposta è 400 e nulla cambia. " +
+          "Se un blocco viene cancellato mentre l'ordine si scrive la risposta è 409 e nulla cambia: ricarica l'elenco e riprova. " +
+          "Un blocco creato nello stesso momento non è un errore: resta dopo gli altri.",
+        security: bearer,
+        requestBody: {
+          required: true,
+          content: json(ref("HomeBlockOrderRequest"), {
+            example: { ids: [BLOCK_ID, OTHER_BLOCK_ID, "d3a9e7b4-61c2-4f08-9a5d-7b8c1e2f3a46"] },
+          }),
+        },
+        responses: {
+          "200": { description: "L'elenco aggiornato, nel nuovo ordine.", content: json(ref("HomeBlockList")) },
+          "400": errorResponse(
+            "Body non valido: `ids` non è una lista di uuid, ha doppioni, oppure non coincide con l'insieme dei blocchi esistenti.",
+            "ids must list every existing block exactly once",
+          ),
+          "401": response("Unauthorized"),
+          "409": errorResponse(
+            "Un blocco è stato cancellato mentre l'ordine veniva scritto (o due transazioni si sono scontrate): nulla è cambiato.",
+            "a block was deleted while the order was being saved: reload the list",
+          ),
+          "413": response("PayloadTooLarge"),
+        },
+      },
+    },
+
+    "/api/admin/home-blocks/{id}": {
+      get: {
+        tags: ["Home (admin)"],
+        operationId: "getHomeBlock",
+        summary: "Dettaglio di un blocco",
+        description: "Tutti i campi, anche per le bozze.",
+        security: bearer,
+        parameters: [{ $ref: "#/components/parameters/Id" }],
+        responses: {
+          "200": { description: "Il blocco.", content: json(ref("HomeBlockAdmin")) },
+          "401": response("Unauthorized"),
+          "404": response("NotFound"),
+        },
+      },
+      patch: {
+        tags: ["Home (admin)"],
+        operationId: "updateHomeBlock",
+        summary: "Modifica un blocco",
+        description: [
+          "Cambia `content` e/o `status`; serve almeno uno dei due. Il `content` viene **sostituito per intero** " +
+            "e riconvalidato per il tipo del blocco: le parti facoltative non inviate diventano `null`. " +
+            "`type` non è ammesso (400) e nemmeno `position`, `id` o le date: l'ordine si cambia con `PUT /api/admin/home-blocks/order`.",
+          "",
+          "Passando a `PUBLISHED` per la prima volta si imposta `publishedAt`; tornare a `DRAFT` ritira il blocco dal pubblico " +
+            "ma conserva la data, che non cambia alle pubblicazioni successive.",
+          "",
+          homeContentRules,
+        ].join("\n"),
+        security: bearer,
+        parameters: [{ $ref: "#/components/parameters/Id" }],
+        requestBody: {
+          required: true,
+          content: json(ref("HomeBlockUpdateRequest"), {
+            examples: {
+              pubblica: { summary: "Pubblica un blocco", value: { status: "PUBLISHED" } },
+              nascondi: { summary: "Riporta un blocco in bozza", value: { status: "DRAFT" } },
+              sostituisci: {
+                summary: "Sostituisce il contenuto di un blocco CTA",
+                value: {
+                  content: {
+                    title: "Sostieni la ricerca",
+                    text: "Ogni contributo finanzia un laboratorio.",
+                    cta: { label: "Dona ora", href: "https://example.org/dona" },
+                  },
+                },
+              },
+            },
+          }),
+        },
+        responses: {
+          "200": { description: "Il blocco aggiornato.", content: json(ref("HomeBlockAdmin")) },
+          "400": errorResponse(
+            "Body non valido: nessun campo da cambiare, `type` o altri campi non ammessi, `status` non ammesso, " +
+              "contenuto non valido per il tipo del blocco, oppure `imageId` che non è un'immagine esistente.",
+            "type cannot be changed",
+          ),
+          "401": response("Unauthorized"),
+          "404": response("NotFound"),
+          "413": response("PayloadTooLarge"),
+        },
+      },
+      delete: {
+        tags: ["Home (admin)"],
+        operationId: "deleteHomeBlock",
+        summary: "Elimina un blocco",
+        description:
+          "Elimina il blocco. Le posizioni degli altri non cambiano (l'ordine resta valido) e i media delle schede restano. " +
+          "Con richieste simultanee una sola risponde 204, le altre 404.",
+        security: bearer,
+        parameters: [{ $ref: "#/components/parameters/Id" }],
+        responses: {
+          "204": { description: "Blocco eliminato, nessun contenuto." },
+          "401": response("Unauthorized"),
+          "404": response("NotFound"),
+        },
+      },
+    },
   },
 
   components: {
@@ -791,6 +1093,239 @@ export const openApiSpec = {
       },
       NewsPublicPage: pageOf("NewsPublicListItem", "Pagina di news pubblicate."),
       NewsAdminPage: pageOf("NewsAdmin", "Pagina di news."),
+
+      HomeBlockType: {
+        type: "string",
+        enum: ["HERO", "TICKER", "CTA", "FEATURED"],
+        description:
+          "Tipo di blocco: `HERO` (apertura), `TICKER` (fascia di frasi), `CTA` (invito all'azione), `FEATURED` (schede in evidenza). " +
+          "Non cambia dopo la creazione.",
+      },
+      HomeCta: {
+        type: "object",
+        description: "Un invito all'azione: etichetta e destinazione.",
+        required: ["label", "href"],
+        additionalProperties: false,
+        properties: {
+          label: { type: "string", maxLength: 60, description: "Testo del pulsante (spazi ai bordi tolti).", example: "Scopri come lavoriamo" },
+          href: hrefProperty("Destinazione."),
+        },
+      },
+      HomeHeroContent: {
+        type: "object",
+        description: "Contenuto di un blocco `HERO`. Nelle risposte `text` e `secondaryCta` ci sono sempre, a `null` quando assenti.",
+        required: ["title", "primaryCta"],
+        additionalProperties: false,
+        properties: {
+          title: { type: "string", maxLength: 200, example: "Un'idea di sapere condiviso" },
+          text: {
+            type: "string",
+            nullable: true,
+            maxLength: 600,
+            description: "Testo di apertura. Vuoto o `null` vale assente.",
+            example: "Ricerca, programmi e viaggi per capire il presente.",
+          },
+          primaryCta: ref("HomeCta"),
+          secondaryCta: { type: "object", allOf: [ref("HomeCta")], nullable: true, description: "Seconda azione, facoltativa." },
+        },
+      },
+      HomeTickerItem: {
+        type: "object",
+        required: ["text"],
+        additionalProperties: false,
+        properties: {
+          text: { type: "string", maxLength: 160, example: "Aperte le iscrizioni al laboratorio di autunno" },
+          href: hrefProperty("Link facoltativo (vuoto o `null` vale assente; nelle risposte è `null`).", {
+            nullable: true,
+            example: "/news/laboratorio-autunno",
+          }),
+        },
+      },
+      HomeTickerContent: {
+        type: "object",
+        description: "Contenuto di un blocco `TICKER`.",
+        required: ["items"],
+        additionalProperties: false,
+        properties: {
+          items: {
+            type: "array",
+            minItems: 1,
+            maxItems: 10,
+            items: ref("HomeTickerItem"),
+            description: "Da 1 a 10 frasi, nell'ordine in cui scorrono.",
+          },
+        },
+      },
+      HomeCtaContent: {
+        type: "object",
+        description: "Contenuto di un blocco `CTA`. Nelle risposte `text` c'è sempre, a `null` quando assente.",
+        required: ["title", "cta"],
+        additionalProperties: false,
+        properties: {
+          title: { type: "string", maxLength: 200, example: "Sostieni il progetto" },
+          text: {
+            type: "string",
+            nullable: true,
+            maxLength: 400,
+            description: "Testo facoltativo. Vuoto o `null` vale assente.",
+            example: "Ogni contributo conta.",
+          },
+          cta: ref("HomeCta"),
+        },
+      },
+      HomeFeaturedItemRequest: {
+        type: "object",
+        required: ["title", "href"],
+        additionalProperties: false,
+        properties: {
+          title: { type: "string", maxLength: 160, example: "Nuovo laboratorio di ricerca" },
+          text: {
+            type: "string",
+            nullable: true,
+            maxLength: 300,
+            description: "Testo facoltativo. Vuoto o `null` vale assente.",
+            example: "Aperte le iscrizioni.",
+          },
+          href: hrefProperty("Destinazione della scheda.", { example: "/news/nuovo-laboratorio-di-ricerca" }),
+          imageId: {
+            type: "string",
+            format: "uuid",
+            nullable: true,
+            description:
+              "Id di un media esistente che sia un'immagine (non un PDF), altrimenti 400. Vuoto o `null` vale nessuna immagine. " +
+              "Nelle risposte al suo posto c'è `image`.",
+            example: MEDIA_ID,
+          },
+        },
+      },
+      HomeFeaturedContentRequest: {
+        type: "object",
+        description: "Contenuto di un blocco `FEATURED`, come si scrive.",
+        required: ["title", "items"],
+        additionalProperties: false,
+        properties: {
+          title: { type: "string", maxLength: 120, example: "In evidenza" },
+          items: { type: "array", minItems: 1, maxItems: 6, items: ref("HomeFeaturedItemRequest"), description: "Da 1 a 6 schede." },
+        },
+      },
+      HomeImage: {
+        type: "object",
+        description: "Immagine di una scheda.",
+        required: ["id", "url", "alt"],
+        properties: {
+          id: { type: "string", format: "uuid", example: MEDIA_ID },
+          url: {
+            type: "string",
+            nullable: true,
+            description: "Indirizzo pubblico del file; `null` se non è configurata la base degli indirizzi pubblici.",
+            example: `http://localhost:9100/mateira-media/media/2026/${MEDIA_ID}.jpg`,
+          },
+          alt: { type: "string", nullable: true, example: "Il laboratorio Mateira visto dall'alto" },
+        },
+      },
+      HomeFeaturedItem: {
+        type: "object",
+        required: ["title", "text", "href", "image"],
+        properties: {
+          title: { type: "string", example: "Nuovo laboratorio di ricerca" },
+          text: { type: "string", nullable: true, example: "Aperte le iscrizioni." },
+          href: { type: "string", example: "/news/nuovo-laboratorio-di-ricerca" },
+          image: {
+            type: "object",
+            allOf: [ref("HomeImage")],
+            nullable: true,
+            description: "`null` se la scheda non ha immagine o se il media è stato cancellato: la scheda continua a funzionare.",
+          },
+        },
+      },
+      HomeFeaturedContent: {
+        type: "object",
+        description: "Contenuto di un blocco `FEATURED`, come si legge: `image` al posto di `imageId`.",
+        required: ["title", "items"],
+        properties: {
+          title: { type: "string", example: "In evidenza" },
+          items: { type: "array", items: ref("HomeFeaturedItem") },
+        },
+      },
+      HomeContentRequest: {
+        description: "Il contenuto, secondo il tipo del blocco (`HERO`, `TICKER`, `CTA` o `FEATURED`).",
+        oneOf: [ref("HomeHeroContent"), ref("HomeTickerContent"), ref("HomeCtaContent"), ref("HomeFeaturedContentRequest")],
+      },
+      HomeContent: {
+        description: "Il contenuto, secondo il tipo del blocco (`HERO`, `TICKER`, `CTA` o `FEATURED`).",
+        oneOf: [ref("HomeHeroContent"), ref("HomeTickerContent"), ref("HomeCtaContent"), ref("HomeFeaturedContent")],
+      },
+      HomeBlockCreateRequest: {
+        type: "object",
+        required: ["type", "content"],
+        additionalProperties: false,
+        properties: {
+          type: ref("HomeBlockType"),
+          content: ref("HomeContentRequest"),
+          status: { allOf: [ref("ContentStatus")], description: "Stato di pubblicazione. Se manca, un nuovo blocco è `DRAFT`." },
+        },
+      },
+      HomeBlockUpdateRequest: {
+        type: "object",
+        description: "Almeno uno dei due campi. `type` non è ammesso.",
+        additionalProperties: false,
+        properties: {
+          content: { allOf: [ref("HomeContentRequest")], description: "Il nuovo contenuto, che sostituisce per intero quello attuale." },
+          status: ref("ContentStatus"),
+        },
+      },
+      HomeBlockOrderRequest: {
+        type: "object",
+        required: ["ids"],
+        additionalProperties: false,
+        properties: {
+          ids: {
+            type: "array",
+            items: { type: "string", format: "uuid" },
+            description: "Gli id di tutti i blocchi esistenti, ciascuno una volta, nell'ordine voluto.",
+          },
+        },
+      },
+      HomeBlockPublic: {
+        type: "object",
+        required: ["id", "type", "content"],
+        properties: {
+          id: { type: "string", format: "uuid", example: BLOCK_ID },
+          type: ref("HomeBlockType"),
+          content: ref("HomeContent"),
+        },
+      },
+      HomeBlockAdmin: {
+        allOf: [
+          ref("HomeBlockPublic"),
+          {
+            type: "object",
+            required: ["position", "status", "publishedAt", "createdAt", "updatedAt"],
+            properties: {
+              position: { type: "integer", minimum: 0, description: "Posizione nell'ordine; a parità vale la data di creazione, poi l'id.", example: 0 },
+              status: ref("ContentStatus"),
+              publishedAt: {
+                type: "string",
+                format: "date-time",
+                nullable: true,
+                description: "Quando il blocco è stato pubblicato per la prima volta; non si azzera più.",
+              },
+              createdAt: { type: "string", format: "date-time" },
+              updatedAt: { type: "string", format: "date-time" },
+            },
+          },
+        ],
+      },
+      HomePublicResponse: {
+        type: "object",
+        required: ["blocks"],
+        properties: { blocks: { type: "array", items: ref("HomeBlockPublic"), description: "I blocchi pubblicati, in ordine." } },
+      },
+      HomeBlockList: {
+        type: "object",
+        required: ["blocks"],
+        properties: { blocks: { type: "array", items: ref("HomeBlockAdmin"), description: "Tutti i blocchi, in ordine." } },
+      },
     },
   },
 };

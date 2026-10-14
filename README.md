@@ -1,6 +1,6 @@
 # Mateira API
 
-Backend REST del sito Mateira: autenticazione del superuser, gestione dei media (upload diretto verso lo storage tramite URL firmati) e delle news con flusso bozza/pubblicato. Node.js e TypeScript, server `http` nativo, Prisma 7, PostgreSQL.
+Backend REST del sito Mateira: autenticazione del superuser, gestione dei media (upload diretto verso lo storage tramite URL firmati), delle news e dei blocchi della Home con flusso bozza/pubblicato. Node.js e TypeScript, server `http` nativo, Prisma 7, PostgreSQL.
 
 ## Requisiti
 
@@ -91,6 +91,7 @@ Gli errori sono JSON nella forma `{ "error": "..." }`. Le risposte sotto `/api/a
 | `GET /api/health` | 200 se il database risponde, 503 altrimenti. |
 | `GET /api/public/news` | News pubblicate, dalla più recente. Parametri: `category`, `limit` (default 12, massimo 50), `page`. |
 | `GET /api/public/news/:slug` | Dettaglio di una news pubblicata. Le bozze rispondono 404. |
+| `GET /api/public/home` | Blocchi pubblicati della Home, già in ordine: `{ blocks: [{ id, type, content }] }`, senza stato, posizione e date. Nelle schede `FEATURED` l'immagine è in `image` (`{ id, url, alt }` oppure `null`). Le bozze non compaiono. |
 | `POST /api/admin/auth/login` | Con `email` e `password` restituisce `accessToken`, `expiresIn` e `user`, e imposta il cookie `mateira_refresh`. Risponde 429 con `Retry-After` oltre il limite di tentativi. |
 | `POST /api/admin/auth/refresh` | Con il cookie di refresh restituisce un nuovo access token e ruota il cookie. Un refresh token già usato revoca tutta la catena. |
 | `POST /api/admin/auth/logout` | Revoca il refresh token e cancella il cookie (204). |
@@ -104,8 +105,25 @@ Gli errori sono JSON nella forma `{ "error": "..." }`. Le risposte sotto `/api/a
 | `GET /api/admin/news/:id` | Dettaglio con tutti i campi, bozze comprese. |
 | `PATCH /api/admin/news/:id` | Modifica parziale. |
 | `DELETE /api/admin/news/:id` | Elimina la news (204). |
+| `GET /api/admin/home-blocks` | Tutti i blocchi della Home in ordine, bozze comprese, con `position`, `status` e date: `{ blocks: [...] }`. |
+| `POST /api/admin/home-blocks` | Crea un blocco `{ type, content, status? }` (201), in fondo alla Home e per default in bozza. |
+| `GET /api/admin/home-blocks/:id` | Dettaglio di un blocco (404 se non esiste). |
+| `PATCH /api/admin/home-blocks/:id` | Cambia `content` e/o `status`. Il `content` sostituisce quello attuale per intero ed è riconvalidato per il tipo del blocco; `type` non è ammesso (400). |
+| `DELETE /api/admin/home-blocks/:id` | Elimina il blocco (204; 404 se già eliminato, anche con richieste simultanee). |
+| `PUT /api/admin/home-blocks/order` | Riordina: `{ ids: [...] }` deve contenere tutti gli id esistenti, ciascuno una volta (altrimenti 400). Riscrive le posizioni 0, 1, 2... in una transazione e risponde 200 con l'elenco aggiornato; 409 se un blocco viene cancellato mentre l'ordine si scrive. |
 
 Le categorie delle news sono `MATEIRA`, `RICERCA`, `PROGRAMMI`, `VIAGGIO_TIRENAUTI`, `INCONTRI`, `COLLABORAZIONI`, `APPUNTAMENTI`, `PRESS` e `COMUNICATI`.
+
+I blocchi della Home hanno un `type` che non cambia dopo la creazione e un `content` validato per tipo (un campo non previsto è rifiutato con 400):
+
+| Tipo | Campi di `content` |
+| --- | --- |
+| `HERO` | `title` (max 200), `text` (max 600, facoltativo), `primaryCta`, `secondaryCta` (facoltativa) |
+| `TICKER` | `items`: da 1 a 10 elementi `{ text (max 160), href (facoltativo) }` |
+| `CTA` | `title` (max 200), `text` (max 400, facoltativo), `cta` |
+| `FEATURED` | `title` (max 120), `items`: da 1 a 6 schede `{ title (max 160), text (max 300, facoltativo), href, imageId (facoltativo) }` |
+
+`primaryCta`, `secondaryCta` e `cta` sono `{ label (max 60), href }`. Un `href` è un percorso interno con una sola `/` iniziale (`/come-lavoriamo`, senza spazi, max 300 caratteri) oppure un indirizzo `http` o `https` valido, che viene normalizzato; `javascript:`, `data:`, `mailto:` e gli indirizzi che iniziano con `//` sono rifiutati. `imageId` deve essere un media esistente che sia un'immagine (non un PDF); se il media viene cancellato dopo, la scheda resta e `image` vale `null`. I blocchi sono letti per `position`, poi data di creazione, poi id; un blocco nuovo va in fondo.
 
 L'upload dei media avviene in due passi: il front end chiama `presign`, poi invia il file con `PUT` direttamente all'`uploadUrl`, usando gli header indicati nella risposta (`Content-Type`). Il file non passa dall'API.
 

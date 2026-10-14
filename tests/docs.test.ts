@@ -10,6 +10,19 @@ import SwaggerParser from "@apidevtools/swagger-parser";
 
 import { openApiSpec } from "../src/modules/docs/openapi";
 import { handleDocs } from "../src/modules/docs/routes";
+import {
+  CARD_TEXT_MAX,
+  CARD_TITLE_MAX,
+  CTA_TEXT_MAX,
+  CTA_TITLE_MAX,
+  FEATURED_ITEMS_MAX,
+  FEATURED_TITLE_MAX,
+  HERO_TEXT_MAX,
+  HERO_TITLE_MAX,
+  LABEL_MAX,
+  TICKER_ITEMS_MAX,
+  TICKER_TEXT_MAX,
+} from "../src/modules/home/service";
 import { newObjectKey } from "../src/modules/media/service";
 import { prisma } from "../src/plugins/prisma";
 import { closeDb, resetDb, startTestServer, type Requester, type TestResponse } from "./helpers/app";
@@ -57,6 +70,13 @@ const ROUTES = [
   "DELETE /api/admin/news/{id}",
   "GET /api/public/news",
   "GET /api/public/news/{slug}",
+  "GET /api/public/home",
+  "GET /api/admin/home-blocks",
+  "POST /api/admin/home-blocks",
+  "PUT /api/admin/home-blocks/order",
+  "GET /api/admin/home-blocks/{id}",
+  "PATCH /api/admin/home-blocks/{id}",
+  "DELETE /api/admin/home-blocks/{id}",
 ];
 
 // The admin routes that are open on purpose: they are how a session starts, renews and ends.
@@ -109,7 +129,7 @@ test("GET /openapi.json serves the OpenAPI 3.0.3 document with every route", asy
   assert.deepEqual(operationsOf(res.json).map((o) => o.key).sort(), [...ROUTES].sort());
   assert.deepEqual(
     res.json.tags.map((tag: { name: string }) => tag.name),
-    ["Sistema", "Autenticazione", "Media", "News (admin)", "News (pubbliche)"],
+    ["Sistema", "Autenticazione", "Media", "News (admin)", "News (pubbliche)", "Home (admin)", "Home (pubblica)"],
   );
   assert.deepEqual(res.json, JSON.parse(JSON.stringify(openApiSpec)));
 });
@@ -439,6 +459,7 @@ const BARE_REQUEST_STATUS: Record<string, number> = {
   "POST /api/admin/auth/refresh": 401,
   "POST /api/admin/auth/logout": 204,
   "GET /api/public/news": 200,
+  "GET /api/public/home": 200,
 };
 
 // An additional guard only: the admin routers answer 401 before they look at the path, so this does not prove that a
@@ -475,7 +496,17 @@ function assertDocumentedAnswer(key: string, op: any, status: number): void {
   assert.ok(documented.includes(String(status)), `${key} answered ${status}, documented: ${documented.join(", ")}`);
 }
 
-type Context = { token: string; cookie: string; mediaId: string; newsId: string; slug: string };
+type Context = {
+  token: string;
+  cookie: string;
+  mediaId: string;
+  newsId: string;
+  slug: string;
+  /** A published CTA block made before the calls. */
+  blockId: string;
+  /** The FEATURED block the POST call creates. */
+  createdBlockId: string;
+};
 
 type Call = {
   key: string;
@@ -555,11 +586,71 @@ const CALLS: Call[] = [
     status: 200,
     send: (r, ctx) => r("GET", `/api/public/news/${ctx.slug}`),
   },
+  {
+    key: "GET /api/public/home",
+    status: 200,
+    send: (r) => r("GET", "/api/public/home"),
+    then: (res, ctx) => assert.ok(res.json.blocks.some((block: { id: string }) => block.id === ctx.blockId)),
+  },
+  {
+    key: "GET /api/admin/home-blocks",
+    status: 200,
+    send: (r, ctx) => r("GET", "/api/admin/home-blocks", { token: ctx.token }),
+    then: (res, ctx) => assert.ok(res.json.blocks.some((block: { id: string }) => block.id === ctx.blockId)),
+  },
+  {
+    key: "POST /api/admin/home-blocks",
+    status: 201,
+    send: (r, ctx) =>
+      r("POST", "/api/admin/home-blocks", {
+        token: ctx.token,
+        body: {
+          type: "FEATURED",
+          content: { title: "Creato dal test", items: [{ title: "Scheda", href: "/news", imageId: ctx.mediaId }] },
+          status: "PUBLISHED",
+        },
+      }),
+    then: (res, ctx) => {
+      ctx.createdBlockId = res.json.id;
+      assert.equal(res.json.content.items[0].image.id, ctx.mediaId);
+    },
+  },
+  {
+    key: "GET /api/admin/home-blocks/{id}",
+    status: 200,
+    send: (r, ctx) => r("GET", `/api/admin/home-blocks/${ctx.blockId}`, { token: ctx.token }),
+    then: (res, ctx) => assert.equal(res.json.id, ctx.blockId),
+  },
+  {
+    key: "PATCH /api/admin/home-blocks/{id}",
+    status: 200,
+    send: (r, ctx) =>
+      r("PATCH", `/api/admin/home-blocks/${ctx.blockId}`, {
+        token: ctx.token,
+        body: { content: { title: "Titolo modificato", cta: { label: "Vai", href: "/news" } } },
+      }),
+    then: (res) => assert.equal(res.json.content.title, "Titolo modificato"),
+  },
+  {
+    key: "PUT /api/admin/home-blocks/order",
+    status: 200,
+    send: async (r, ctx) => {
+      const list = await r("GET", "/api/admin/home-blocks", { token: ctx.token });
+      const ids: string[] = list.json.blocks.map((block: { id: string }) => block.id).reverse();
+      return r("PUT", "/api/admin/home-blocks/order", { token: ctx.token, body: { ids } });
+    },
+    then: (res, ctx) => assert.deepEqual(res.json.blocks.map((block: { id: string }) => block.id), [ctx.createdBlockId, ctx.blockId]),
+  },
   { key: "POST /api/admin/auth/logout", status: 204, send: (r, ctx) => r("POST", "/api/admin/auth/logout", { cookie: ctx.cookie }) },
   {
     key: "DELETE /api/admin/news/{id}",
     status: 204,
     send: (r, ctx) => r("DELETE", `/api/admin/news/${ctx.newsId}`, { token: ctx.token }),
+  },
+  {
+    key: "DELETE /api/admin/home-blocks/{id}",
+    status: 204,
+    send: (r, ctx) => r("DELETE", `/api/admin/home-blocks/${ctx.blockId}`, { token: ctx.token }),
   },
   {
     key: "DELETE /api/admin/media/{id}",
@@ -587,7 +678,24 @@ test("every documented operation answers on the real router with a status the do
       imageId: media.id,
     },
   });
-  const ctx: Context = { token, cookie, mediaId: media.id, newsId: news.id, slug: news.slug };
+  const block = await prisma.homeBlock.create({
+    data: {
+      type: "CTA",
+      position: 0,
+      content: { title: "Invito di prova", text: null, cta: { label: "Scopri", href: "/come-lavoriamo" } },
+      status: "PUBLISHED",
+      publishedAt: new Date("2026-10-01T09:00:00Z"),
+    },
+  });
+  const ctx: Context = {
+    token,
+    cookie,
+    mediaId: media.id,
+    newsId: news.id,
+    slug: news.slug,
+    blockId: block.id,
+    createdBlockId: "",
+  };
 
   const documented = new Map(operationsOf(openApiSpec).map((o) => [o.key, o.op]));
   assert.deepEqual(CALLS.map((call) => call.key).sort(), [...documented.keys()].sort(), "one call for every documented operation");
@@ -615,14 +723,80 @@ test("an unknown id or slug answers 404 on every route that takes one", async ()
   for (const { key, method, path: pathName, op } of operationsOf(openApiSpec)) {
     if (!/\{(id|slug)\}/.test(pathName)) continue;
     const url = pathName.replace("{id}", unknownId).replace("{slug}", "no-such-slug");
-    const body = method === "PATCH" ? (pathName.includes("/media/") ? { alt: "Testo" } : { title: "Titolo" }) : undefined;
+    const patchBody = pathName.includes("/media/")
+      ? { alt: "Testo" }
+      : pathName.includes("/home-blocks/")
+        ? { status: "PUBLISHED" }
+        : { title: "Titolo" };
+    const body = method === "PATCH" ? patchBody : undefined;
     const res = await request(method, url, { token, body });
     assertDocumentedAnswer(key, op, res.status);
     assert.equal(res.status, 404, key);
     assert.deepEqual(res.json, { error: "Not found" }, key);
     checked++;
   }
-  assert.equal(checked, 6);
+  assert.equal(checked, 9);
+});
+
+test("the documented Home request examples are accepted by the real router", async () => {
+  await resetDb();
+  const { token } = await loginAsAdmin(request);
+  const post: any = (openApiSpec.paths as any)["/api/admin/home-blocks"].post;
+  const examples: Record<string, { value: any }> = post.requestBody.content["application/json"].examples;
+  assert.deepEqual(
+    Object.values(examples)
+      .map((example) => example.value.type)
+      .sort(),
+    ["CTA", "FEATURED", "HERO", "TICKER"],
+    "one example for every type of block",
+  );
+
+  // The FEATURED example points at a media: register one with that id, as the reader of the document would have.
+  const imageId: string = examples.featured.value.content.items[0].imageId;
+  await prisma.media.create({
+    data: { id: imageId, bucket: "mateira-media", objectKey: newObjectKey("image/png"), mimeType: "image/png", alt: "Esempio" },
+  });
+  for (const [name, example] of Object.entries(examples)) {
+    const res = await request("POST", "/api/admin/home-blocks", { token, body: example.value });
+    assert.equal(res.status, 201, `${name}: ${JSON.stringify(res.json)}`);
+    assert.equal(res.json.type, example.value.type, name);
+  }
+
+  const cta = (await request("POST", "/api/admin/home-blocks", { token, body: examples.cta.value })).json;
+  const patch: any = (openApiSpec.paths as any)["/api/admin/home-blocks/{id}"].patch;
+  const patchExamples: Record<string, { value: unknown }> = patch.requestBody.content["application/json"].examples;
+  assert.ok(Object.keys(patchExamples).length >= 3);
+  for (const [name, example] of Object.entries(patchExamples)) {
+    const res = await request("PATCH", `/api/admin/home-blocks/${cta.id}`, { token, body: example.value });
+    assert.equal(res.status, 200, `${name}: ${JSON.stringify(res.json)}`);
+  }
+
+  // The order example lists ids that do not exist: the real router refuses it with the documented 400.
+  const order: any = (openApiSpec.paths as any)["/api/admin/home-blocks/order"].put;
+  const reorder = await request("PUT", "/api/admin/home-blocks/order", {
+    token,
+    body: order.requestBody.content["application/json"].example,
+  });
+  assert.equal(reorder.status, 400);
+  assert.ok(Object.keys(order.responses).includes("400"));
+});
+
+test("the limits written in the Home schemas are the ones the code enforces", () => {
+  const schemas: any = openApiSpec.components.schemas;
+  assert.equal(schemas.HomeCta.properties.label.maxLength, LABEL_MAX);
+  assert.equal(schemas.HomeHeroContent.properties.title.maxLength, HERO_TITLE_MAX);
+  assert.equal(schemas.HomeHeroContent.properties.text.maxLength, HERO_TEXT_MAX);
+  assert.equal(schemas.HomeTickerContent.properties.items.maxItems, TICKER_ITEMS_MAX);
+  assert.equal(schemas.HomeTickerContent.properties.items.minItems, 1);
+  assert.equal(schemas.HomeTickerItem.properties.text.maxLength, TICKER_TEXT_MAX);
+  assert.equal(schemas.HomeCtaContent.properties.title.maxLength, CTA_TITLE_MAX);
+  assert.equal(schemas.HomeCtaContent.properties.text.maxLength, CTA_TEXT_MAX);
+  assert.equal(schemas.HomeFeaturedContentRequest.properties.title.maxLength, FEATURED_TITLE_MAX);
+  assert.equal(schemas.HomeFeaturedContentRequest.properties.items.maxItems, FEATURED_ITEMS_MAX);
+  assert.equal(schemas.HomeFeaturedContentRequest.properties.items.minItems, 1);
+  assert.equal(schemas.HomeFeaturedItemRequest.properties.title.maxLength, CARD_TITLE_MAX);
+  assert.equal(schemas.HomeFeaturedItemRequest.properties.text.maxLength, CARD_TEXT_MAX);
+  assert.deepEqual(schemas.HomeBlockType.enum, ["HERO", "TICKER", "CTA", "FEATURED"]);
 });
 
 test("the check can fail: a route that does not exist answers 404 and is not in the document", async () => {
