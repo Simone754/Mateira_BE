@@ -5,7 +5,7 @@ import { formatStartupBanner, type OpenApiLike } from "../../src/lib/startupBann
 import { openApiSpec } from "../../src/modules/docs/openapi";
 
 const BASE_URL = "http://localhost:4000";
-const METHODS = ["get", "post", "put", "patch", "delete"] as const;
+const METHODS = ["get", "post", "put", "patch", "delete", "head", "options", "trace"] as const;
 
 /** The operations of the real document, read independently of the code under test. */
 function documentedOperations(): { method: string; path: string; admin: boolean }[] {
@@ -156,6 +156,100 @@ test("a spec without top-level tags still lists every operation, grouped by firs
     "  First",
     "    GET     /a",
   ]);
+});
+
+test("groups follow the top-level tags even when the paths come in another order", () => {
+  const spec: OpenApiLike = {
+    tags: [{ name: "B" }, { name: "A" }],
+    paths: {
+      "/first": { get: { tags: ["A"] } },
+      "/second": { get: { tags: ["B"] } },
+    },
+  };
+
+  const lines = formatStartupBanner({ baseUrl: BASE_URL, docsEnabled: true, spec }).split("\n");
+
+  assert.deepEqual(lines.slice(lines.indexOf("Rotte (2)")), [
+    "Rotte (2)",
+    "  B",
+    "    GET     /second",
+    "  A",
+    "    GET     /first",
+  ]);
+});
+
+test("the methods of one path are listed as get, post, put, patch, delete, head, options, trace whatever the input order", () => {
+  // The document lists them in exactly the opposite order.
+  const spec: OpenApiLike = {
+    paths: {
+      "/all": {
+        trace: { tags: ["T"] },
+        options: { tags: ["T"] },
+        head: { tags: ["T"] },
+        delete: { tags: ["T"] },
+        patch: { tags: ["T"] },
+        put: { tags: ["T"] },
+        post: { tags: ["T"] },
+        get: { tags: ["T"] },
+      },
+    },
+  };
+
+  const lines = formatStartupBanner({ baseUrl: BASE_URL, docsEnabled: true, spec }).split("\n");
+
+  assert.deepEqual(lines.slice(lines.indexOf("Rotte (8)")), [
+    "Rotte (8)",
+    "  T",
+    "    GET     /all",
+    "    POST    /all",
+    "    PUT     /all",
+    "    PATCH   /all",
+    "    DELETE  /all",
+    "    HEAD    /all",
+    "    OPTIONS /all",
+    "    TRACE   /all",
+  ]);
+});
+
+test("keys of a path item that are not operations are never counted as routes", () => {
+  const spec: OpenApiLike = {
+    paths: {
+      "/things": {
+        parameters: [{ name: "locale", in: "query" }],
+        summary: "Things",
+        description: "Everything that is a thing.",
+        servers: [{ url: "/" }],
+        get: { tags: ["T"] },
+      },
+    },
+  };
+
+  const lines = formatStartupBanner({ baseUrl: BASE_URL, docsEnabled: true, spec }).split("\n");
+
+  assert.ok(lines.includes("Rotte (1)"));
+  assert.deepEqual(
+    lines.filter((line) => line.startsWith("    ")),
+    ["    GET     /things"],
+  );
+});
+
+test("a path item with path-level keys, a $ref or a null or non-object method still type-checks and lists only the operations", () => {
+  const spec: OpenApiLike = {
+    paths: {
+      "/shared": {
+        $ref: "#/components/pathItems/shared",
+        parameters: [],
+        get: { tags: ["T"] },
+        post: null,
+        put: "not an operation",
+        delete: ["not", "an", "operation"],
+      },
+    },
+  };
+
+  const lines = formatStartupBanner({ baseUrl: BASE_URL, docsEnabled: true, spec }).split("\n");
+
+  assert.deepEqual(lines.slice(lines.indexOf("Rotte (1)")), ["Rotte (1)", "  T", "    GET     /shared"]);
 });
 
 test("an empty document prints a zero count and no groups", () => {

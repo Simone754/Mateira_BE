@@ -3,7 +3,8 @@ export type OpenApiOperationLike = { summary?: string; tags?: string[]; security
 /** The part of an OpenAPI document the banner reads. `openApiSpec` satisfies it as is. */
 export type OpenApiLike = {
   tags?: { name: string }[];
-  paths: Record<string, Record<string, OpenApiOperationLike>>;
+  // A path item holds the operations (get, post, ...) next to keys such as parameters, summary or $ref.
+  paths: Record<string, Record<string, unknown>>;
 };
 
 export type StartupBannerOptions = {
@@ -49,6 +50,10 @@ export function formatStartupBanner({ baseUrl, docsEnabled, spec }: StartupBanne
   return lines.join("\n");
 }
 
+function isOperation(value: unknown): value is OpenApiOperationLike {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
 function groupRoutes(spec: OpenApiLike): { groups: Map<string, Route[]>; total: number; pathWidth: number } {
   // Declared tags first, in the order of the document. Unlisted tags are added as they appear, after them.
   const tagged = new Map<string, Route[]>((spec.tags ?? []).map((tag) => [tag.name, []]));
@@ -58,8 +63,8 @@ function groupRoutes(spec: OpenApiLike): { groups: Map<string, Route[]>; total: 
 
   for (const [path, item] of Object.entries(spec.paths)) {
     for (const method of METHOD_ORDER) {
-      const operation: OpenApiOperationLike | undefined = item[method];
-      if (!operation) continue;
+      const operation = item[method];
+      if (!isOperation(operation)) continue;
 
       const route: Route = { method: method.toUpperCase(), path, admin: (operation.security?.length ?? 0) > 0 };
       const tag = operation.tags?.[0];

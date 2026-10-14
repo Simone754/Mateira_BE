@@ -116,7 +116,7 @@ Con il server in esecuzione:
 - `http://localhost:4000/docs` apre Swagger UI, dove si provano tutte le rotte dal browser.
 - `http://localhost:4000/openapi.json` è il documento OpenAPI 3.0.3, scritto a mano in `src/modules/docs/openapi.ts`: si può anche importare in Postman o usare per generare un client.
 
-All'avvio (`npm run dev` o `npm start`) il terminale stampa l'indirizzo di Swagger UI e di `openapi.json` e l'elenco delle rotte, raggruppate per tag, con `(admin)` accanto a quelle che richiedono il token. L'elenco è letto da `src/modules/docs/openapi.ts`, quindi è completo solo per le rotte documentate. Con `DOCS_ENABLED=false` il terminale stampa soltanto l'indirizzo del server.
+All'avvio (`npm run dev` o `npm start`) il terminale stampa l'indirizzo di Swagger UI e di `openapi.json` e l'elenco delle rotte, raggruppate per tag, con `(admin)` accanto a quelle che richiedono il token. L'elenco è letto da `src/modules/docs/openapi.ts`, quindi è completo solo per le rotte documentate. Con `DOCS_ENABLED=false` il terminale stampa soltanto l'indirizzo del server e la riga `Documentazione disattivata (DOCS_ENABLED=false)`.
 
 Per provare le rotte admin bastano due passi:
 
