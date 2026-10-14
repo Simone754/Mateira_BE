@@ -1,11 +1,13 @@
 import { createApp } from "./app";
-import { PORT } from "./config/settings";
+import { DOCS_ENABLED, PORT } from "./config/settings";
+import { formatStartupBanner } from "./lib/startupBanner";
+import { openApiSpec } from "./modules/docs/openapi";
 import { pool, prisma } from "./plugins/prisma";
 
 const server = createApp();
 
 server.listen(PORT, () => {
-  console.log(`API running on http://localhost:${PORT}`);
+  console.log(formatStartupBanner({ baseUrl: `http://localhost:${PORT}`, docsEnabled: DOCS_ENABLED, spec: openApiSpec }));
 });
 
 let shuttingDown = false;
