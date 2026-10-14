@@ -80,3 +80,23 @@ model News {
 
   @@index([status, date])
 }
+
+enum HomeBlockType {
+  HERO
+  TICKER
+  CTA
+  FEATURED
+}
+
+model HomeBlock {
+  id          String        @id @default(uuid())
+  type        HomeBlockType
+  position    Int
+  content     Json
+  status      ContentStatus @default(DRAFT)
+  publishedAt DateTime?
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  @@index([status, position])
+}
