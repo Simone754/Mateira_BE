@@ -7,6 +7,7 @@
  * Technical names, enums and error strings follow the code; descriptions are in Italian.
  */
 
+import { WORD_PAGES } from "../words/dto";
 import { WORD_SEEDS } from "../words/seedData";
 
 const ref = (name: string) => ({ $ref: `#/components/schemas/${name}` });
@@ -57,9 +58,13 @@ const wordPublicExample = {
   page: fondazione.page,
 };
 
+/** The 400 answer of a `page` filter outside the list: the same message for the public and the admin list. */
+const PAGE_FILTER_ERROR = `page must be one of: ${WORD_PAGES.join(", ")}`;
+
 const WORD_TEXT_RULES =
-  "Testo semplice: una riga vuota separa i paragrafi, una riga singola va a capo. Gli spazi ai bordi vengono tolti e i fine riga `\\r\\n` diventano `\\n` " +
-  "prima di misurare la lunghezza.";
+  "Regole dei testi `etymology`, `meaning` e `closing`: testo semplice, una riga vuota separa i paragrafi, una riga singola va a capo. " +
+  "Gli spazi ai bordi vengono tolti e i fine riga `\\r\\n` e `\\r` diventano `\\n` prima di misurare la lunghezza. " +
+  "Il `term` invece è una sola riga: un a capo al suo interno è un 400.";
 const DATE_PATTERN = "^\\d{4}-\\d{2}-\\d{2}(T\\d{2}:\\d{2}(:\\d{2}(\\.\\d{1,9})?)?(Z|[+-]\\d{2}:\\d{2})?)?$";
 
 const refreshCookieNote =
@@ -884,10 +889,7 @@ export const openApiSpec = {
             description: "Le parole pubblicate, in ordine.",
             content: json(ref("WordPublicList"), { example: { words: [wordPublicExample] } }),
           },
-          "400": errorResponse(
-            "`page` non è una delle pagine ammesse (anche se vuoto).",
-            "page must be one of: home, mateira, come-lavoriamo, tirreno, programmi, impatto, tirenauti, viaggio-dei-tirenauti, partecipare, collabora-con-mateira",
-          ),
+          "400": errorResponse("`page` non è una delle pagine ammesse (anche se vuoto).", PAGE_FILTER_ERROR),
         },
       },
     },
@@ -903,7 +905,7 @@ export const openApiSpec = {
         parameters: [{ $ref: "#/components/parameters/WordPageFilter" }],
         responses: {
           "200": { description: "Le parole, in ordine.", content: json(ref("WordAdminList")) },
-          "400": errorResponse("`page` non è una delle pagine ammesse (anche se vuoto).", "page must be one of: home, mateira, ..."),
+          "400": errorResponse("`page` non è una delle pagine ammesse (anche se vuoto).", PAGE_FILTER_ERROR),
           "401": response("Unauthorized"),
         },
       },
@@ -996,7 +998,7 @@ export const openApiSpec = {
           "200": { description: "La parola aggiornata.", content: json(ref("WordAdmin")) },
           "400": errorResponse(
             "Body non valido: nessun campo da cambiare, campo non previsto, testo obbligatorio vuoto, fuori limite o su più righe (`term`), " +
-              "pagina, posizione o stato non ammessi.",
+              "pagina, posizione o stato non ammessi oppure caratteri che non si possono salvare.",
             "nothing to change",
           ),
           "401": response("Unauthorized"),
@@ -1531,18 +1533,7 @@ export const openApiSpec = {
       WordPage: {
         type: "string",
         description: "Pagina del sito che mostra la parola: la chiave è il percorso della pagina (`home` per la Home).",
-        enum: [
-          "home",
-          "mateira",
-          "come-lavoriamo",
-          "tirreno",
-          "programmi",
-          "impatto",
-          "tirenauti",
-          "viaggio-dei-tirenauti",
-          "partecipare",
-          "collabora-con-mateira",
-        ],
+        enum: [...WORD_PAGES],
       },
       WordPublic: {
         type: "object",

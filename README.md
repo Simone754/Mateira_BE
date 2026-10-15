@@ -16,7 +16,7 @@ cp .env.example .env          # poi compilare i valori vuoti, vedi sotto
 npm install
 npm run db:migrate            # applica le migrazioni al database "mateira"
 npm run seed                  # crea il superuser da SUPERUSER_EMAIL e SUPERUSER_PASSWORD
-npm run seed:words            # carica le sei parole iniziali (solo quelle che mancano)
+npm run seed:words            # solo al primo avvio: carica le sei parole iniziali (vedi sotto prima di rilanciarlo)
 npm run dev                   # tsx watch src/server.ts
 ```
 
@@ -25,7 +25,7 @@ npm run dev                   # tsx watch src/server.ts
 - `npm install` esegue `prisma generate` (script `postinstall`).
 - Il server ascolta su `PORT` (default 4000). `GET http://localhost:4000/api/health` risponde `{"status":"ok"}` quando il database risponde.
 - Il seed gestisce l'unico superuser. Se non esiste lo crea. Se esiste e email o password sono cambiate, li aggiorna e revoca tutte le sue sessioni; se non è cambiato nulla, non tocca niente. Se nel database ci sono più superuser si ferma con un errore (409) senza modificare nulla: vanno rimossi a mano.
-- `npm run seed:words` crea le parole di MATEIRA della prima uscita che non ci sono ancora (stesso termine sulla stessa pagina) e non tocca mai quelle esistenti: le correzioni fatte dal pannello restano. Fondazione, Generare e Viaggio nascono pubblicate; MATEIRA, Disegnare e Trasformazione in bozza, in attesa di conferma.
+- `npm run seed:words` crea le parole di MATEIRA della prima uscita che non ci sono ancora (stesso termine sulla stessa pagina) e non tocca mai quelle esistenti: le correzioni fatte dal pannello restano. Fondazione, Generare e Viaggio nascono pubblicate; MATEIRA, Disegnare e Trasformazione in bozza, in attesa di conferma. Serve solo al primo avvio: rilanciarlo ricrea ogni parola iniziale che dal pannello è stata eliminata, rinominata o spostata su un'altra pagina (Fondazione, Generare e Viaggio tornerebbero pubblicate e una parola rinominata comparirebbe due volte), quindi non va rilanciato in produzione dopo modifiche redazionali.
 
 ## Test
 
@@ -86,7 +86,7 @@ Se `MEDIA_ENDPOINT`, `MEDIA_ACCESS_KEY`, `MEDIA_SECRET_KEY` o `MEDIA_BUCKET` man
 
 ## API
 
-Gli errori sono JSON nella forma `{ "error": "..." }`. Le risposte sotto `/api/admin` hanno `Cache-Control: no-store`. Le rotte admin, escluse `login`, `refresh` e `logout`, richiedono l'header `Authorization: Bearer <accessToken>`. Il controllo è unico, in `src/app.ts`, e copre ogni percorso sotto `/api/admin/`: senza token anche un percorso che non esiste risponde 401.
+Gli errori sono JSON nella forma `{ "error": "..." }`. Le risposte sotto `/api/admin` hanno `Cache-Control: no-store`. Le rotte admin, escluse `login`, `refresh` e `logout`, richiedono l'header `Authorization: Bearer <accessToken>`. Il controllo è unico, in `src/app.ts`, e copre ogni percorso sotto `/api/admin/` tranne le rotte `login`, `refresh` e `logout`: senza token qualunque altro percorso, anche uno che non esiste, risponde 401.
 
 | Metodo e percorso | Descrizione |
 | --- | --- |
@@ -133,7 +133,7 @@ I blocchi della Home hanno un `type` che non cambia dopo la creazione e un `cont
 
 `primaryCta`, `secondaryCta` e `cta` sono `{ label (max 60), href }`. Un `href` è un percorso interno con una sola `/` iniziale (`/come-lavoriamo`, senza spazi, max 300 caratteri) oppure un indirizzo `http` o `https` valido senza nome utente né password; entrambi vengono salvati come li scrive il parser degli indirizzi (segmenti `.` risolti, virgolette, apice, `<`, `>` e backtick codificati con `%`, un percorso semplice resta uguale); `javascript:`, `data:`, `mailto:` e gli indirizzi che iniziano con `//` (anche `/.//`) sono rifiutati. `imageId` deve essere un media esistente che sia un'immagine (non un PDF); se il media viene cancellato dopo, la scheda resta e `image` vale `null`. I blocchi sono letti per `position`, poi data di creazione, poi id; un blocco nuovo va in fondo.
 
-Le parole di MATEIRA hanno `term` (max 60, una sola riga), `etymology` (max 1000), `meaning` (max 3000), `closing` (max 300, facoltativa), `page` e `position` (da 0 a 9999). I testi sono semplici: una riga vuota separa i paragrafi, una riga singola va a capo; i fine riga `\r\n` diventano `\n` prima di misurare la lunghezza. Le pagine ammesse, nell'ordine in cui le restituisce l'elenco senza filtro, sono `home`, `mateira`, `come-lavoriamo`, `tirreno`, `programmi`, `impatto`, `tirenauti`, `viaggio-dei-tirenauti`, `partecipare` e `collabora-con-mateira`. Dentro una pagina l'ordine è `position`, poi data di creazione, poi id; una parola nuova, o spostata senza `position`, va in fondo alla pagina.
+Le parole di MATEIRA hanno `term` (max 60, una sola riga), `etymology` (max 1000), `meaning` (max 3000), `closing` (max 300, facoltativa), `page` e `position` (da 0 a 9999). I testi sono semplici: una riga vuota separa i paragrafi, una riga singola va a capo; i fine riga `\r\n` e `\r` diventano `\n` prima di misurare la lunghezza. Le pagine ammesse, nell'ordine in cui le restituisce l'elenco senza filtro, sono `home`, `mateira`, `come-lavoriamo`, `tirreno`, `programmi`, `impatto`, `tirenauti`, `viaggio-dei-tirenauti`, `partecipare` e `collabora-con-mateira`. Dentro una pagina l'ordine è `position`, poi data di creazione, poi id; una parola nuova, o spostata senza `position`, va in fondo alla pagina.
 
 L'upload dei media avviene in due passi: il front end chiama `presign`, poi invia il file con `PUT` direttamente all'`uploadUrl`, usando gli header indicati nella risposta (`Content-Type`). Il file non passa dall'API.
 

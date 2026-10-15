@@ -1078,6 +1078,18 @@ test("the page filter of the words is not prefilled", () => {
   }
 });
 
+test("the documented 400 of the word page filter is what the real router answers", async () => {
+  const { token } = await loginAsAdmin(request);
+  const documented = (pathName: string) =>
+    (openApiSpec.paths as any)[pathName].get.responses["400"].content["application/json"].example;
+  const publicRes = await request("GET", "/api/public/words?page=news");
+  assert.equal(publicRes.status, 400);
+  assert.deepEqual(publicRes.json, documented("/api/public/words"));
+  const adminRes = await request("GET", "/api/admin/words?page=news", { token });
+  assert.equal(adminRes.status, 400);
+  assert.deepEqual(adminRes.json, documented("/api/admin/words"));
+});
+
 test("the documented word request examples are accepted by the real router", async () => {
   await resetDb();
   const { token } = await loginAsAdmin(request);
