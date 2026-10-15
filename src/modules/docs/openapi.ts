@@ -7,6 +7,8 @@
  * Technical names, enums and error strings follow the code; descriptions are in Italian.
  */
 
+import { WORD_SEEDS } from "../words/seedData";
+
 const ref = (name: string) => ({ $ref: `#/components/schemas/${name}` });
 const response = (name: string) => ({ $ref: `#/components/responses/${name}` });
 const json = (schema: object, extra: object = {}) => ({ "application/json": { schema, ...extra } });
@@ -42,6 +44,22 @@ const MEDIA_ID = "3f2b8c1e-5d4a-4e7b-9a60-1c2d3e4f5a6b";
 const NEWS_ID = "7c9e6679-7425-40de-944b-e07fc1f90ae7";
 const BLOCK_ID = "b5f1c0de-2a7e-4c3b-8d19-6e0a4f7c2d38";
 const OTHER_BLOCK_ID = "0b1f6a52-8c3d-4d5e-b7a1-2e9f4c6d8a10";
+const WORD_ID = "4a7d2c9e-3b1f-4e8a-9c6d-5f0e1a2b3c4d";
+const fondazione = WORD_SEEDS.find((word) => word.term === "Fondazione")!;
+const viaggio = WORD_SEEDS.find((word) => word.term === "Viaggio")!;
+
+const wordPublicExample = {
+  id: WORD_ID,
+  term: fondazione.term,
+  etymology: fondazione.etymology,
+  meaning: fondazione.meaning,
+  closing: fondazione.closing,
+  page: fondazione.page,
+};
+
+const WORD_TEXT_RULES =
+  "Testo semplice: una riga vuota separa i paragrafi, una riga singola va a capo. Gli spazi ai bordi vengono tolti e i fine riga `\\r\\n` diventano `\\n` " +
+  "prima di misurare la lunghezza.";
 const DATE_PATTERN = "^\\d{4}-\\d{2}-\\d{2}(T\\d{2}:\\d{2}(:\\d{2}(\\.\\d{1,9})?)?(Z|[+-]\\d{2}:\\d{2})?)?$";
 
 const refreshCookieNote =
@@ -231,7 +249,7 @@ export const openApiSpec = {
     title: "Mateira API",
     version: "1.0.0",
     description: [
-      "API del backend di **Mateira**: news e blocchi della Home pubblici, media e area riservata al superuser.",
+      "API del backend di **Mateira**: news, blocchi della Home e parole di MATEIRA pubblici, media e area riservata al superuser.",
       "",
       "## Come autenticarsi",
       "",
@@ -264,6 +282,12 @@ export const openApiSpec = {
         "Blocchi della Home (hero, ticker, inviti all'azione, schede in evidenza): crea, modifica, riordina, nascondi (bozza) e cancella. Richiede il token.",
     },
     { name: "Home (pubblica)", description: "I blocchi pubblicati della Home, già in ordine, senza autenticazione." },
+    {
+      name: "Parole (admin)",
+      description:
+        "Le parole di MATEIRA (termine, etimologia, significato, frase conclusiva), collocate per pagina: crea, modifica, sposta, nascondi (bozza) e cancella. Richiede il token.",
+    },
+    { name: "Parole (pubblica)", description: "Le parole pubblicate, pagina per pagina e in ordine, senza autenticazione." },
   ],
   paths: {
     "/api/health": {
@@ -843,6 +867,158 @@ export const openApiSpec = {
         },
       },
     },
+
+    "/api/public/words": {
+      get: {
+        tags: ["Parole (pubblica)"],
+        operationId: "listWordsPublic",
+        summary: "Parole pubblicate",
+        description:
+          "Solo le parole `PUBLISHED`. Con `page` restituisce quelle di una pagina, in ordine (posizione, poi data di creazione, poi id); " +
+          "senza `page` tutte, ordinate per pagina (nell'ordine dell'elenco `WordPage`) e poi per posizione. " +
+          "Ogni parola è `{ id, term, etymology, meaning, closing, page }`: nessun campo amministrativo (stato, posizione, date). " +
+          "`closing` è `null` se la parola non ha frase conclusiva. Senza parole pubblicate `words` è una lista vuota.",
+        parameters: [{ $ref: "#/components/parameters/WordPageFilter" }],
+        responses: {
+          "200": {
+            description: "Le parole pubblicate, in ordine.",
+            content: json(ref("WordPublicList"), { example: { words: [wordPublicExample] } }),
+          },
+          "400": errorResponse(
+            "`page` non è una delle pagine ammesse (anche se vuoto).",
+            "page must be one of: home, mateira, come-lavoriamo, tirreno, programmi, impatto, tirenauti, viaggio-dei-tirenauti, partecipare, collabora-con-mateira",
+          ),
+        },
+      },
+    },
+
+    "/api/admin/words": {
+      get: {
+        tags: ["Parole (admin)"],
+        operationId: "listWords",
+        summary: "Elenco delle parole",
+        description:
+          "Tutte le parole, bozze comprese, con posizione, stato e date. Stesso ordine dell'elenco pubblico; con `page` solo quelle di una pagina.",
+        security: bearer,
+        parameters: [{ $ref: "#/components/parameters/WordPageFilter" }],
+        responses: {
+          "200": { description: "Le parole, in ordine.", content: json(ref("WordAdminList")) },
+          "400": errorResponse("`page` non è una delle pagine ammesse (anche se vuoto).", "page must be one of: home, mateira, ..."),
+          "401": response("Unauthorized"),
+        },
+      },
+      post: {
+        tags: ["Parole (admin)"],
+        operationId: "createWord",
+        summary: "Crea una parola",
+        description:
+          "Crea una parola, per default in bozza (`DRAFT`). Senza `position` va in fondo alla sua pagina " +
+          "(massimo attuale più uno, al massimo 9999). Con `status` `PUBLISHED` è subito pubblica e `publishedAt` è l'ora attuale. " +
+          "Un campo non previsto è rifiutato con 400. La stessa pagina non può avere due parole con lo stesso termine (409). " +
+          WORD_TEXT_RULES,
+        security: bearer,
+        requestBody: {
+          required: true,
+          content: json(ref("WordCreateRequest"), {
+            examples: {
+              completa: {
+                summary: "Una parola pubblicata, con frase conclusiva",
+                value: {
+                  term: fondazione.term,
+                  etymology: fondazione.etymology,
+                  meaning: fondazione.meaning,
+                  closing: fondazione.closing,
+                  page: fondazione.page,
+                  status: "PUBLISHED",
+                },
+              },
+              minima: {
+                summary: "Solo i campi obbligatori (bozza, in fondo alla pagina, senza frase conclusiva)",
+                value: { term: viaggio.term, etymology: viaggio.etymology, meaning: viaggio.meaning, page: viaggio.page },
+              },
+            },
+          }),
+        },
+        responses: {
+          "201": { description: "Parola creata.", content: json(ref("WordAdmin")) },
+          "400": errorResponse(
+            "Body non valido: campo obbligatorio mancante o vuoto, fuori limite, non previsto, termine su più righe, pagina o stato non ammessi, " +
+              "posizione fuori scala oppure caratteri che non si possono salvare.",
+            "term is required",
+          ),
+          "401": response("Unauthorized"),
+          "409": response("DuplicateWord"),
+          "413": response("PayloadTooLarge"),
+        },
+      },
+    },
+
+    "/api/admin/words/{id}": {
+      get: {
+        tags: ["Parole (admin)"],
+        operationId: "getWord",
+        summary: "Dettaglio di una parola",
+        description: "Tutti i campi, anche per le bozze.",
+        security: bearer,
+        parameters: [{ $ref: "#/components/parameters/Id" }],
+        responses: {
+          "200": { description: "La parola.", content: json(ref("WordAdmin")) },
+          "401": response("Unauthorized"),
+          "404": response("NotFound"),
+        },
+      },
+      patch: {
+        tags: ["Parole (admin)"],
+        operationId: "updateWord",
+        summary: "Modifica una parola",
+        description:
+          "Cambia uno o più campi; quelli non inviati restano com'erano. `closing: null` (o vuoto) toglie la frase conclusiva. " +
+          "Spostata su un'altra pagina senza `position`, la parola va in fondo alla nuova pagina. " +
+          "Passando a `PUBLISHED` per la prima volta si imposta `publishedAt`; tornare a `DRAFT` ritira la parola dal pubblico ma conserva la data. " +
+          "Rinominarla o spostarla su una pagina che ha già lo stesso termine risponde 409 e non cambia nulla. " +
+          WORD_TEXT_RULES,
+        security: bearer,
+        parameters: [{ $ref: "#/components/parameters/Id" }],
+        requestBody: {
+          required: true,
+          content: json(ref("WordUpdateRequest"), {
+            examples: {
+              pubblica: { summary: "Pubblica una parola", value: { status: "PUBLISHED" } },
+              sposta: { summary: "Sposta una parola su un'altra pagina, in fondo", value: { page: "programmi" } },
+              correggi: {
+                summary: "Corregge il significato e toglie la frase conclusiva",
+                value: { meaning: "Fondare significa partire da basi solide.", closing: null },
+              },
+            },
+          }),
+        },
+        responses: {
+          "200": { description: "La parola aggiornata.", content: json(ref("WordAdmin")) },
+          "400": errorResponse(
+            "Body non valido: nessun campo da cambiare, campo non previsto, testo obbligatorio vuoto, fuori limite o su più righe (`term`), " +
+              "pagina, posizione o stato non ammessi.",
+            "nothing to change",
+          ),
+          "401": response("Unauthorized"),
+          "404": response("NotFound"),
+          "409": response("DuplicateWord"),
+          "413": response("PayloadTooLarge"),
+        },
+      },
+      delete: {
+        tags: ["Parole (admin)"],
+        operationId: "deleteWord",
+        summary: "Elimina una parola",
+        description: "Elimina la parola. Con richieste simultanee una sola risponde 204, le altre 404.",
+        security: bearer,
+        parameters: [{ $ref: "#/components/parameters/Id" }],
+        responses: {
+          "204": { description: "Parola eliminata, nessun contenuto." },
+          "401": response("Unauthorized"),
+          "404": response("NotFound"),
+        },
+      },
+    },
   },
 
   components: {
@@ -879,6 +1055,15 @@ export const openApiSpec = {
         description: "Solo le news di questa categoria.",
         schema: ref("NewsCategory"),
       },
+      WordPageFilter: {
+        name: "page",
+        in: "query",
+        required: false,
+        description:
+          "Solo le parole di questa pagina. Senza il parametro, tutte le pagine nell'ordine dell'elenco. " +
+          "Un valore fuori elenco (anche vuoto) risponde 400; ripetuto, vale l'ultimo.",
+        schema: ref("WordPage"),
+      },
     },
 
     responses: {
@@ -886,6 +1071,10 @@ export const openApiSpec = {
       NotFound: errorResponse("Risorsa non trovata (o id non valido).", "Not found"),
       PayloadTooLarge: errorResponse("Il body supera 1 MB (1000000 byte). La connessione viene chiusa.", "payload too large"),
       SlugConflict: errorResponse("Non è stato possibile ricavare uno slug univoco, per esempio per richieste concorrenti.", "could not generate a unique slug"),
+      DuplicateWord: errorResponse(
+        "Esiste già una parola con questo termine nella stessa pagina (confronto esatto, dopo aver tolto gli spazi ai bordi).",
+        "a word with this term already exists on this page",
+      ),
       TooManyRequests: {
         description: "Troppi tentativi di login: riprova dopo i secondi indicati in `Retry-After`.",
         headers: {
@@ -1338,6 +1527,114 @@ export const openApiSpec = {
         type: "object",
         required: ["blocks"],
         properties: { blocks: { type: "array", items: ref("HomeBlockAdmin"), description: "Tutti i blocchi, in ordine." } },
+      },
+      WordPage: {
+        type: "string",
+        description: "Pagina del sito che mostra la parola: la chiave è il percorso della pagina (`home` per la Home).",
+        enum: [
+          "home",
+          "mateira",
+          "come-lavoriamo",
+          "tirreno",
+          "programmi",
+          "impatto",
+          "tirenauti",
+          "viaggio-dei-tirenauti",
+          "partecipare",
+          "collabora-con-mateira",
+        ],
+      },
+      WordPublic: {
+        type: "object",
+        required: ["id", "term", "etymology", "meaning", "closing", "page"],
+        properties: {
+          id: { type: "string", format: "uuid", example: WORD_ID },
+          term: { type: "string", example: fondazione.term },
+          etymology: {
+            type: "string",
+            description: "Etimologia (per la parola MATEIRA, la definizione del nome). Una riga vuota separa i paragrafi.",
+            example: fondazione.etymology,
+          },
+          meaning: { type: "string", description: "Il significato per MATEIRA. Una riga vuota separa i paragrafi.", example: fondazione.meaning },
+          closing: { type: "string", nullable: true, description: "Frase conclusiva; `null` se la parola non ne ha.", example: fondazione.closing },
+          page: ref("WordPage"),
+        },
+      },
+      WordAdmin: {
+        allOf: [
+          ref("WordPublic"),
+          {
+            type: "object",
+            required: ["position", "status", "publishedAt", "createdAt", "updatedAt"],
+            properties: {
+              position: {
+                type: "integer",
+                minimum: 0,
+                maximum: 9999,
+                description: "Ordine nella pagina; a parità vale la data di creazione, poi l'id.",
+                example: 0,
+              },
+              status: ref("ContentStatus"),
+              publishedAt: {
+                type: "string",
+                format: "date-time",
+                nullable: true,
+                description: "Quando la parola è stata pubblicata per la prima volta; non si azzera più.",
+              },
+              createdAt: { type: "string", format: "date-time" },
+              updatedAt: { type: "string", format: "date-time" },
+            },
+          },
+        ],
+      },
+      WordCreateRequest: {
+        type: "object",
+        required: ["term", "etymology", "meaning", "page"],
+        additionalProperties: false,
+        properties: {
+          term: { type: "string", maxLength: 60, description: "Il termine, su una sola riga.", example: fondazione.term },
+          etymology: { type: "string", maxLength: 1000, description: "Etimologia (per MATEIRA la definizione del nome)." },
+          meaning: { type: "string", maxLength: 3000, description: "Il significato per MATEIRA." },
+          closing: { type: "string", nullable: true, maxLength: 300, description: "Frase conclusiva, facoltativa: `null` o vuota vale \"nessuna\"." },
+          page: ref("WordPage"),
+          position: {
+            type: "integer",
+            minimum: 0,
+            maximum: 9999,
+            description: "Ordine nella pagina. Se manca, la parola va in fondo alla pagina.",
+          },
+          status: { allOf: [ref("ContentStatus")], description: "Stato di pubblicazione. Se manca, una nuova parola è `DRAFT`." },
+        },
+      },
+      WordUpdateRequest: {
+        type: "object",
+        description: "Almeno un campo. I campi non inviati non cambiano.",
+        minProperties: 1,
+        additionalProperties: false,
+        properties: {
+          term: { type: "string", maxLength: 60, description: "Il termine, su una sola riga." },
+          etymology: { type: "string", maxLength: 1000 },
+          meaning: { type: "string", maxLength: 3000 },
+          closing: { type: "string", nullable: true, maxLength: 300, description: "`null` o vuota toglie la frase conclusiva." },
+          page: ref("WordPage"),
+          position: {
+            type: "integer",
+            minimum: 0,
+            maximum: 9999,
+            description: "Ordine nella pagina. Cambiando pagina senza `position`, la parola va in fondo alla nuova pagina.",
+          },
+          status: ref("ContentStatus"),
+        },
+      },
+      WordPublicList: {
+        type: "object",
+        required: ["words"],
+        properties: { words: { type: "array", items: ref("WordPublic"), description: "Le parole pubblicate, in ordine." } },
+      },
+      WordAdminList: {
+        type: "object",
+        required: ["words"],
+        properties: { words: { type: "array", items: ref("WordAdmin"), description: "Tutte le parole, in ordine." } },
       },
     },
   },

@@ -16,6 +16,7 @@ cp .env.example .env          # poi compilare i valori vuoti, vedi sotto
 npm install
 npm run db:migrate            # applica le migrazioni al database "mateira"
 npm run seed                  # crea il superuser da SUPERUSER_EMAIL e SUPERUSER_PASSWORD
+npm run seed:words            # carica le sei parole iniziali (solo quelle che mancano)
 npm run dev                   # tsx watch src/server.ts
 ```
 
@@ -24,6 +25,7 @@ npm run dev                   # tsx watch src/server.ts
 - `npm install` esegue `prisma generate` (script `postinstall`).
 - Il server ascolta su `PORT` (default 4000). `GET http://localhost:4000/api/health` risponde `{"status":"ok"}` quando il database risponde.
 - Il seed gestisce l'unico superuser. Se non esiste lo crea. Se esiste e email o password sono cambiate, li aggiorna e revoca tutte le sue sessioni; se non è cambiato nulla, non tocca niente. Se nel database ci sono più superuser si ferma con un errore (409) senza modificare nulla: vanno rimossi a mano.
+- `npm run seed:words` crea le parole di MATEIRA della prima uscita che non ci sono ancora (stesso termine sulla stessa pagina) e non tocca mai quelle esistenti: le correzioni fatte dal pannello restano. Fondazione, Generare e Viaggio nascono pubblicate; MATEIRA, Disegnare e Trasformazione in bozza, in attesa di conferma.
 
 ## Test
 
@@ -92,6 +94,7 @@ Gli errori sono JSON nella forma `{ "error": "..." }`. Le risposte sotto `/api/a
 | `GET /api/public/news` | News pubblicate, dalla più recente. Parametri: `category`, `limit` (default 12, massimo 50), `page`. |
 | `GET /api/public/news/:slug` | Dettaglio di una news pubblicata. Le bozze rispondono 404. |
 | `GET /api/public/home` | Blocchi pubblicati della Home, già in ordine: `{ blocks: [{ id, type, content }] }`, senza stato, posizione e date. Nelle schede `FEATURED` l'immagine è in `image` (`{ id, url, alt }` oppure `null`). Le bozze non compaiono. |
+| `GET /api/public/words` | Parole di MATEIRA pubblicate: `{ words: [{ id, term, etymology, meaning, closing, page }] }`. Con `page` quelle di una pagina, in ordine; senza, tutte, pagina per pagina. Una pagina fuori elenco risponde 400. |
 | `POST /api/admin/auth/login` | Con `email` e `password` restituisce `accessToken`, `expiresIn` e `user`, e imposta il cookie `mateira_refresh`. Risponde 429 con `Retry-After` oltre il limite di tentativi. |
 | `POST /api/admin/auth/refresh` | Con il cookie di refresh restituisce un nuovo access token e ruota il cookie. Un refresh token già usato revoca tutta la catena. |
 | `POST /api/admin/auth/logout` | Revoca il refresh token e cancella il cookie (204). |
@@ -111,6 +114,11 @@ Gli errori sono JSON nella forma `{ "error": "..." }`. Le risposte sotto `/api/a
 | `PATCH /api/admin/home-blocks/:id` | Cambia `content` e/o `status`. Il `content` sostituisce quello attuale per intero ed è riconvalidato per il tipo del blocco; `type` non è ammesso (400). |
 | `DELETE /api/admin/home-blocks/:id` | Elimina il blocco (204; 404 se già eliminato, anche con richieste simultanee). |
 | `PUT /api/admin/home-blocks/order` | Riordina: `{ ids: [...] }` deve contenere tutti gli id esistenti, ciascuno una volta (altrimenti 400). Riscrive le posizioni 0, 1, 2... in una transazione e risponde 200 con l'elenco aggiornato; 409 se un blocco viene cancellato mentre l'ordine si scrive. |
+| `GET /api/admin/words` | Tutte le parole, bozze comprese, con `position`, `status` e date: `{ words: [...] }`. Filtro facoltativo `page`. |
+| `POST /api/admin/words` | Crea una parola `{ term, etymology, meaning, closing?, page, position?, status? }` (201), per default in bozza e in fondo alla sua pagina. 409 se la pagina ha già lo stesso termine. |
+| `GET /api/admin/words/:id` | Dettaglio di una parola (404 se non esiste). |
+| `PATCH /api/admin/words/:id` | Modifica uno o più campi. Spostata su un'altra pagina senza `position`, la parola va in fondo; `closing: null` toglie la frase conclusiva; 409 se la nuova combinazione pagina e termine esiste già. |
+| `DELETE /api/admin/words/:id` | Elimina la parola (204; 404 se già eliminata, anche con richieste simultanee). |
 
 Le categorie delle news sono `MATEIRA`, `RICERCA`, `PROGRAMMI`, `VIAGGIO_TIRENAUTI`, `INCONTRI`, `COLLABORAZIONI`, `APPUNTAMENTI`, `PRESS` e `COMUNICATI`.
 
@@ -124,6 +132,8 @@ I blocchi della Home hanno un `type` che non cambia dopo la creazione e un `cont
 | `FEATURED` | `title` (max 120), `items`: da 1 a 6 schede `{ title (max 160), text (max 300, facoltativo), href, imageId (facoltativo) }` |
 
 `primaryCta`, `secondaryCta` e `cta` sono `{ label (max 60), href }`. Un `href` è un percorso interno con una sola `/` iniziale (`/come-lavoriamo`, senza spazi, max 300 caratteri) oppure un indirizzo `http` o `https` valido senza nome utente né password; entrambi vengono salvati come li scrive il parser degli indirizzi (segmenti `.` risolti, virgolette, apice, `<`, `>` e backtick codificati con `%`, un percorso semplice resta uguale); `javascript:`, `data:`, `mailto:` e gli indirizzi che iniziano con `//` (anche `/.//`) sono rifiutati. `imageId` deve essere un media esistente che sia un'immagine (non un PDF); se il media viene cancellato dopo, la scheda resta e `image` vale `null`. I blocchi sono letti per `position`, poi data di creazione, poi id; un blocco nuovo va in fondo.
+
+Le parole di MATEIRA hanno `term` (max 60, una sola riga), `etymology` (max 1000), `meaning` (max 3000), `closing` (max 300, facoltativa), `page` e `position` (da 0 a 9999). I testi sono semplici: una riga vuota separa i paragrafi, una riga singola va a capo; i fine riga `\r\n` diventano `\n` prima di misurare la lunghezza. Le pagine ammesse, nell'ordine in cui le restituisce l'elenco senza filtro, sono `home`, `mateira`, `come-lavoriamo`, `tirreno`, `programmi`, `impatto`, `tirenauti`, `viaggio-dei-tirenauti`, `partecipare` e `collabora-con-mateira`. Dentro una pagina l'ordine è `position`, poi data di creazione, poi id; una parola nuova, o spostata senza `position`, va in fondo alla pagina.
 
 L'upload dei media avviene in due passi: il front end chiama `presign`, poi invia il file con `PUT` direttamente all'`uploadUrl`, usando gli header indicati nella risposta (`Content-Type`). Il file non passa dall'API.
 

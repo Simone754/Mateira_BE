@@ -26,6 +26,8 @@ import {
   TICKER_TEXT_MAX,
 } from "../src/modules/home/service";
 import { newObjectKey } from "../src/modules/media/service";
+import { WORD_PAGES } from "../src/modules/words/dto";
+import { CLOSING_MAX, ETYMOLOGY_MAX, MEANING_MAX, POSITION_MAX, TERM_MAX } from "../src/modules/words/service";
 import { prisma } from "../src/plugins/prisma";
 import { closeDb, resetDb, startTestServer, type Requester, type TestResponse } from "./helpers/app";
 import { ADMIN_EMAIL, ADMIN_PASSWORD, loginAsAdmin, refreshPair } from "./helpers/auth";
@@ -79,6 +81,12 @@ const ROUTES = [
   "GET /api/admin/home-blocks/{id}",
   "PATCH /api/admin/home-blocks/{id}",
   "DELETE /api/admin/home-blocks/{id}",
+  "GET /api/public/words",
+  "GET /api/admin/words",
+  "POST /api/admin/words",
+  "GET /api/admin/words/{id}",
+  "PATCH /api/admin/words/{id}",
+  "DELETE /api/admin/words/{id}",
 ];
 
 // The admin routes that are open on purpose: they are how a session starts, renews and ends.
@@ -131,7 +139,7 @@ test("GET /openapi.json serves the OpenAPI 3.0.3 document with every route", asy
   assert.deepEqual(operationsOf(res.json).map((o) => o.key).sort(), [...ROUTES].sort());
   assert.deepEqual(
     res.json.tags.map((tag: { name: string }) => tag.name),
-    ["Sistema", "Autenticazione", "Media", "News (admin)", "News (pubbliche)", "Home (admin)", "Home (pubblica)"],
+    ["Sistema", "Autenticazione", "Media", "News (admin)", "News (pubbliche)", "Home (admin)", "Home (pubblica)", "Parole (admin)", "Parole (pubblica)"],
   );
   assert.deepEqual(res.json, JSON.parse(JSON.stringify(openApiSpec)));
 });
@@ -462,6 +470,7 @@ const BARE_REQUEST_STATUS: Record<string, number> = {
   "POST /api/admin/auth/logout": 204,
   "GET /api/public/news": 200,
   "GET /api/public/home": 200,
+  "GET /api/public/words": 200,
 };
 
 // An additional guard only: the admin routers answer 401 before they look at the path, so this does not prove that a
@@ -508,6 +517,8 @@ type Context = {
   blockId: string;
   /** The FEATURED block the POST call creates. */
   createdBlockId: string;
+  /** A published word on the page "mateira", made before the calls. */
+  wordId: string;
 };
 
 type Call = {
@@ -643,6 +654,39 @@ const CALLS: Call[] = [
     },
     then: (res, ctx) => assert.deepEqual(res.json.blocks.map((block: { id: string }) => block.id), [ctx.createdBlockId, ctx.blockId]),
   },
+  {
+    key: "GET /api/public/words",
+    status: 200,
+    send: (r) => r("GET", "/api/public/words?page=mateira"),
+    then: (res, ctx) => assert.ok(res.json.words.some((word: { id: string }) => word.id === ctx.wordId)),
+  },
+  {
+    key: "GET /api/admin/words",
+    status: 200,
+    send: (r, ctx) => r("GET", "/api/admin/words", { token: ctx.token }),
+    then: (res, ctx) => assert.ok(res.json.words.some((word: { id: string }) => word.id === ctx.wordId)),
+  },
+  {
+    key: "POST /api/admin/words",
+    status: 201,
+    send: (r, ctx) =>
+      r("POST", "/api/admin/words", {
+        token: ctx.token,
+        body: { term: "Creata dal test", etymology: "Dal latino.", meaning: "Significato.", page: "home" },
+      }),
+  },
+  {
+    key: "GET /api/admin/words/{id}",
+    status: 200,
+    send: (r, ctx) => r("GET", `/api/admin/words/${ctx.wordId}`, { token: ctx.token }),
+    then: (res, ctx) => assert.equal(res.json.id, ctx.wordId),
+  },
+  {
+    key: "PATCH /api/admin/words/{id}",
+    status: 200,
+    send: (r, ctx) => r("PATCH", `/api/admin/words/${ctx.wordId}`, { token: ctx.token, body: { closing: "Frase conclusiva." } }),
+    then: (res) => assert.equal(res.json.closing, "Frase conclusiva."),
+  },
   { key: "POST /api/admin/auth/logout", status: 204, send: (r, ctx) => r("POST", "/api/admin/auth/logout", { cookie: ctx.cookie }) },
   {
     key: "DELETE /api/admin/news/{id}",
@@ -653,6 +697,11 @@ const CALLS: Call[] = [
     key: "DELETE /api/admin/home-blocks/{id}",
     status: 204,
     send: (r, ctx) => r("DELETE", `/api/admin/home-blocks/${ctx.blockId}`, { token: ctx.token }),
+  },
+  {
+    key: "DELETE /api/admin/words/{id}",
+    status: 204,
+    send: (r, ctx) => r("DELETE", `/api/admin/words/${ctx.wordId}`, { token: ctx.token }),
   },
   {
     key: "DELETE /api/admin/media/{id}",
@@ -689,6 +738,17 @@ test("every documented operation answers on the real router with a status the do
       publishedAt: new Date("2026-10-01T09:00:00Z"),
     },
   });
+  const word = await prisma.word.create({
+    data: {
+      term: "Parola di prova",
+      etymology: "Dal latino.",
+      meaning: "Significato di prova.",
+      page: "mateira",
+      position: 0,
+      status: "PUBLISHED",
+      publishedAt: new Date("2026-10-01T09:00:00Z"),
+    },
+  });
   const ctx: Context = {
     token,
     cookie,
@@ -697,6 +757,7 @@ test("every documented operation answers on the real router with a status the do
     slug: news.slug,
     blockId: block.id,
     createdBlockId: "",
+    wordId: word.id,
   };
 
   const documented = new Map(operationsOf(openApiSpec).map((o) => [o.key, o.op]));
@@ -729,7 +790,9 @@ test("an unknown id or slug answers 404 on every route that takes one", async ()
       ? { alt: "Testo" }
       : pathName.includes("/home-blocks/")
         ? { status: "PUBLISHED" }
-        : { title: "Titolo" };
+        : pathName.includes("/words/")
+          ? { meaning: "Testo" }
+          : { title: "Titolo" };
     const body = method === "PATCH" ? patchBody : undefined;
     const res = await request(method, url, { token, body });
     assertDocumentedAnswer(key, op, res.status);
@@ -737,7 +800,7 @@ test("an unknown id or slug answers 404 on every route that takes one", async ()
     assert.deepEqual(res.json, { error: "Not found" }, key);
     checked++;
   }
-  assert.equal(checked, 9);
+  assert.equal(checked, 12);
 });
 
 test("the documented Home request examples are accepted by the real router", async () => {
@@ -978,4 +1041,111 @@ test("the check can fail: a route that does not exist answers 404 and is not in 
   // Without a token the same missing routes answer 401: the unauthenticated check cannot tell them from real ones.
   assert.equal((await request("PUT", "/api/admin/news")).status, 401);
   assert.equal((await request("GET", `/api/admin/news/${uuid}/deeper`)).status, 401);
+});
+
+test("the limits written in the word schemas are the ones the code enforces", () => {
+  const schemas: any = openApiSpec.components.schemas;
+  assert.deepEqual(schemas.WordPage.enum, [...WORD_PAGES]);
+  for (const name of ["WordCreateRequest", "WordUpdateRequest"]) {
+    const properties = schemas[name].properties;
+    assert.equal(properties.term.maxLength, TERM_MAX, name);
+    assert.equal(properties.etymology.maxLength, ETYMOLOGY_MAX, name);
+    assert.equal(properties.meaning.maxLength, MEANING_MAX, name);
+    assert.equal(properties.closing.maxLength, CLOSING_MAX, name);
+    assert.equal(properties.position.minimum, 0, name);
+    assert.equal(properties.position.maximum, POSITION_MAX, name);
+    assert.equal(schemas[name].additionalProperties, false, name);
+  }
+  assert.deepEqual(schemas.WordCreateRequest.required, ["term", "etymology", "meaning", "page"]);
+  assert.equal(schemas.WordUpdateRequest.required, undefined);
+  assert.equal(schemas.WordUpdateRequest.minProperties, 1);
+});
+
+test("the page filter of the words is not prefilled", () => {
+  const filter: any = openApiSpec.components.parameters.WordPageFilter;
+  assert.equal(filter.name, "page");
+  assert.equal(filter.in, "query");
+  assert.equal(filter.required, false);
+  for (const node of [filter, openApiSpec.components.schemas.WordPage as any]) {
+    for (const keyword of ["example", "examples", "default"]) assert.equal(node[keyword], undefined, keyword);
+  }
+  for (const [pathName, method] of [
+    ["/api/public/words", "get"],
+    ["/api/admin/words", "get"],
+  ]) {
+    const parameters = (openApiSpec.paths as any)[pathName][method].parameters;
+    assert.deepEqual(parameters, [{ $ref: "#/components/parameters/WordPageFilter" }], pathName);
+  }
+});
+
+test("the documented word request examples are accepted by the real router", async () => {
+  await resetDb();
+  const { token } = await loginAsAdmin(request);
+  const post: any = (openApiSpec.paths as any)["/api/admin/words"].post;
+  const createExamples: Record<string, { value: any }> = post.requestBody.content["application/json"].examples;
+  assert.ok(Object.keys(createExamples).length >= 2);
+
+  let id = "";
+  for (const [name, example] of Object.entries(createExamples)) {
+    const res = await request("POST", "/api/admin/words", { token, body: example.value });
+    assert.equal(res.status, 201, `${name}: ${JSON.stringify(res.json)}`);
+    id ||= res.json.id;
+  }
+
+  const patchOp: any = (openApiSpec.paths as any)["/api/admin/words/{id}"].patch;
+  const patchExamples: Record<string, { value: any }> = patchOp.requestBody.content["application/json"].examples;
+  for (const [name, example] of Object.entries(patchExamples)) {
+    const res = await request("PATCH", `/api/admin/words/${id}`, { token, body: example.value });
+    assert.equal(res.status, 200, `${name}: ${JSON.stringify(res.json)}`);
+  }
+});
+
+test("real word answers, a null closing included, match the documented response schemas", async () => {
+  await resetDb();
+  const { token } = await loginAsAdmin(request);
+  const ajv = new Ajv({ strict: false, allErrors: true, validateFormats: false });
+  ajv.addSchema(structuredClone(openApiSpec), "openapi");
+  const conforms = (label: string, validate: ReturnType<typeof validatorFor>, value: unknown) => {
+    assert.ok(validate(value), `${label} does not match the document: ${ajv.errorsText(validate.errors)}\n${JSON.stringify(value)}`);
+  };
+  const send = (method: string, path: string, body?: unknown) => request(method, path, { token, body });
+
+  const created = validatorFor(ajv, "/api/admin/words", "post", "201");
+  const withClosing = await send("POST", "/api/admin/words", {
+    term: "Fondazione",
+    etymology: "Dal latino FUNDUS.",
+    meaning: "Fondare.",
+    closing: "Porre solide basi.",
+    page: "mateira",
+    status: "PUBLISHED",
+  });
+  const withoutClosing = await send("POST", "/api/admin/words", {
+    term: "Viaggio",
+    etymology: "Dal latino VIATICUM.",
+    meaning: "Muoversi.",
+    page: "viaggio-dei-tirenauti",
+    status: "PUBLISHED",
+  });
+  assert.equal(withoutClosing.json.closing, null, "the case under test is really there");
+  conforms("POST with closing", created, withClosing.json);
+  conforms("POST without closing", created, withoutClosing.json);
+
+  conforms("GET /api/admin/words", validatorFor(ajv, "/api/admin/words", "get", "200"), (await send("GET", "/api/admin/words")).json);
+  const one = (await send("GET", `/api/admin/words/${withoutClosing.json.id}`)).json;
+  conforms("GET /api/admin/words/{id}", validatorFor(ajv, "/api/admin/words/{id}", "get", "200"), one);
+  conforms(
+    "PATCH /api/admin/words/{id}",
+    validatorFor(ajv, "/api/admin/words/{id}", "patch", "200"),
+    (await send("PATCH", `/api/admin/words/${withClosing.json.id}`, { status: "DRAFT" })).json,
+  );
+  const publicList = (await send("GET", "/api/public/words")).json;
+  assert.equal(publicList.words.length, 1);
+  conforms("GET /api/public/words", validatorFor(ajv, "/api/public/words", "get", "200"), publicList);
+
+  // The check can fail: a word without its page, or with a page outside the list, is refused.
+  const adminWord = validatorFor(ajv, "/api/admin/words/{id}", "get", "200");
+  const { page, ...withoutPage } = one;
+  assert.ok(page);
+  assert.equal(adminWord(withoutPage), false);
+  assert.equal(adminWord({ ...one, page: "news" }), false);
 });
