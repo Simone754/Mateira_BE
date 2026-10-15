@@ -19,6 +19,7 @@
     "db:deploy": "prisma migrate deploy",
     "db:test:migrate": "node --env-file=.env.test node_modules/prisma/build/index.js migrate deploy",
     "seed": "tsx src/scripts/seed-superuser.ts",
+    "seed:words": "tsx src/scripts/seed-words.ts",
     "test": "tsx --env-file=.env.test --test --test-concurrency=1 \"tests/**/*.test.ts\"",
     "postinstall": "prisma generate"
   },
