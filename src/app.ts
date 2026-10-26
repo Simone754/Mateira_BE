@@ -11,6 +11,7 @@ import { handleHome } from "./modules/home/routes";
 import { handleMedia } from "./modules/media/routes";
 import { handleNews } from "./modules/news/routes";
 import { handleOrgans } from "./modules/organs/routes";
+import { handlePeople } from "./modules/people/routes";
 import { handleWords } from "./modules/words/routes";
 import { applyCors } from "./plugins/cors";
 import { prisma } from "./plugins/prisma";
@@ -80,6 +81,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
   if (await handleHome(req, res, url, parts, session)) return;
   if (await handleWords(req, res, url, parts, session)) return;
   if (await handleOrgans(req, res, url, parts, session)) return;
+  if (await handlePeople(req, res, url, parts, session)) return;
 
   notFound(res);
 }
