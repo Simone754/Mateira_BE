@@ -170,5 +170,6 @@ model PersonRole {
   position  Int
   createdAt DateTime       @default(now())
 
+  @@unique([personId, kind, organId], map: "PersonRole_personId_kind_organId_key")
   @@index([kind, organId, position])
 }
