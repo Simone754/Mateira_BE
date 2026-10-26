@@ -7,6 +7,8 @@
  * Technical names, enums and error strings follow the code; descriptions are in Italian.
  */
 
+import { ORGAN_CATEGORIES } from "../organs/dto";
+import { PERSON_ROLE_KINDS, PUBLIC_PERSON_ROLE_KINDS } from "../people/dto";
 import { WORD_PAGES } from "../words/dto";
 import { WORD_SEEDS } from "../words/seedData";
 
@@ -65,6 +67,79 @@ const WORD_TEXT_RULES =
   "Regole dei testi `etymology`, `meaning` e `closing`: testo semplice, una riga vuota separa i paragrafi, una riga singola va a capo. " +
   "Gli spazi ai bordi vengono tolti e i fine riga `\\r\\n` e `\\r` diventano `\\n` prima di misurare la lunghezza. " +
   "Il `term` invece è una sola riga: un a capo al suo interno è un 400.";
+const ORGAN_ID = "9d4e1f7a-6b2c-4a83-b5d0-3c8e2f1a7b64";
+const OTHER_ORGAN_ID = "c1a8e5b2-7d3f-4b96-8a14-0e2d6f9b3c57";
+const PERSON_ID = "e6b3a9d1-2c4f-4d78-9b05-7a1c8e3f5d20";
+const ROLE_ID = "5f2c8d0a-9e1b-4c37-a6d4-1b7e3a9c0f68";
+const PERSON_PHOTO_URL = `http://localhost:9100/mateira-media/media/2026/${MEDIA_ID}.jpg`;
+
+/** A member of an organ or a person of a public list, as the site gets it. */
+const memberPublicExample = {
+  id: PERSON_ID,
+  name: "Anna Rossi",
+  bio: "Fisica e docente, ha promosso la nascita della Fondazione.\n\nCoordina il comitato scientifico.",
+  photo: { id: MEDIA_ID, url: PERSON_PHOTO_URL, alt: "Ritratto di Anna Rossi" },
+  title: "Presidente",
+};
+const organPublicExample = {
+  id: ORGAN_ID,
+  name: "Consiglio di amministrazione",
+  category: "GOVERNANCE",
+  description: "Guida la Fondazione e ne approva gli indirizzi.",
+  members: [memberPublicExample],
+};
+const organAdminExample = {
+  id: ORGAN_ID,
+  name: "Consiglio di amministrazione",
+  category: "GOVERNANCE",
+  description: "Guida la Fondazione e ne approva gli indirizzi.",
+  position: 0,
+  status: "PUBLISHED",
+  publishedAt: "2026-10-26T09:00:00.000Z",
+  createdAt: "2026-10-20T08:30:00.000Z",
+  updatedAt: "2026-10-26T09:00:00.000Z",
+  memberCount: 1,
+};
+const organAdminDetailExample = {
+  ...organAdminExample,
+  members: [{ ...memberPublicExample, roleId: ROLE_ID, status: "PUBLISHED" }],
+};
+const personAdminExample = {
+  id: PERSON_ID,
+  name: "Anna Rossi",
+  bio: memberPublicExample.bio,
+  photo: memberPublicExample.photo,
+  status: "PUBLISHED",
+  publishedAt: "2026-10-26T09:00:00.000Z",
+  createdAt: "2026-10-20T08:30:00.000Z",
+  updatedAt: "2026-10-26T09:00:00.000Z",
+  roles: [
+    { id: "a0d7c3e9-1f5b-4286-b9e4-6c2a8d1f3b75", kind: "PROMOTER", organId: null, organName: null, title: "Promotrice", position: 0 },
+    { id: ROLE_ID, kind: "ORGAN_MEMBER", organId: ORGAN_ID, organName: "Consiglio di amministrazione", title: "Presidente", position: 0 },
+  ],
+};
+
+/** The 400 answers of the filters: the same messages for the public and the admin list. */
+const CATEGORY_FILTER_ERROR = `category must be one of: ${ORGAN_CATEGORIES.join(", ")}`;
+const PUBLIC_ROLE_ERROR = `role is required: ${PUBLIC_PERSON_ROLE_KINDS.join(", ")}`;
+const ROLE_FILTER_ERROR = `role must be one of: ${PERSON_ROLE_KINDS.join(", ")}`;
+
+const ORGAN_PUBLICATION_RULE =
+  "Regola di pubblicazione: si pubblica solo ciò che è formalizzato. Un organo compare solo se è `PUBLISHED` (anche senza membri pubblicati: " +
+  "il sito mostra il nome e le funzioni); un suo membro compare solo se sono `PUBLISHED` sia la persona sia l'organo. ";
+
+const PEOPLE_TEXT_RULES =
+  "Regole dei testi: spazi ai bordi tolti, i fine riga `\\r\\n` e `\\r` diventano `\\n` prima di misurare la lunghezza, " +
+  "caratteri nulli o unicode spezzati rifiutati con 400. `name` (e il `title` di un incarico) sono su una sola riga: un a capo è un 400. " +
+  "`bio` e `description` sono testo semplice: una riga vuota separa i paragrafi. Un campo facoltativo vuoto o `null` vale \"assente\".";
+
+const ROLES_RULES =
+  "`roles` è l'elenco completo degli incarichi, al massimo 20: `[{ kind, organId?, title?, position? }]`. " +
+  "`organId` è obbligatorio se e solo se `kind` è `ORGAN_MEMBER` e deve essere un organo esistente (400 altrimenti). " +
+  "Una persona ha al massimo un incarico per lista, cioè per la stessa coppia `kind` e `organId`: un doppione, anche nella stessa richiesta, è un 400 `duplicate role`; " +
+  "se invece lo stesso incarico viene scritto da due richieste simultanee, una risponde 409. " +
+  "Un incarico senza `position` va in fondo alla sua lista (stesso `kind` e, per `ORGAN_MEMBER`, stesso organo). ";
+
 const DATE_PATTERN = "^\\d{4}-\\d{2}-\\d{2}(T\\d{2}:\\d{2}(:\\d{2}(\\.\\d{1,9})?)?(Z|[+-]\\d{2}:\\d{2})?)?$";
 
 const refreshCookieNote =
@@ -293,6 +368,20 @@ export const openApiSpec = {
         "Le parole di MATEIRA (termine, etimologia, significato, frase conclusiva), collocate per pagina: crea, modifica, sposta, nascondi (bozza) e cancella. Richiede il token.",
     },
     { name: "Parole (pubblica)", description: "Le parole pubblicate, pagina per pagina e in ordine, senza autenticazione." },
+    {
+      name: "Organi (admin)",
+      description:
+        "Gli organi della Fondazione, di governo o consultivi, con i loro membri: crea, modifica, riordina con `position`, nascondi (bozza) e cancella. Richiede il token.",
+    },
+    {
+      name: "Persone (admin)",
+      description:
+        "Le persone con uno o più incarichi (promotore, team, ambasciatore, membro di un organo): crea, modifica, nascondi (bozza) e cancella. Richiede il token.",
+    },
+    {
+      name: "Governance e persone (pubblica)",
+      description: "Gli organi e le persone pubblicati, già in ordine, senza autenticazione. Si pubblica solo ciò che è formalizzato.",
+    },
   ],
   paths: {
     "/api/health": {
@@ -1021,6 +1110,319 @@ export const openApiSpec = {
         },
       },
     },
+
+    "/api/public/organs": {
+      get: {
+        tags: ["Governance e persone (pubblica)"],
+        operationId: "listOrgansPublic",
+        summary: "Organi pubblicati con i loro membri",
+        description:
+          ORGAN_PUBLICATION_RULE +
+          "Gli organi sono in ordine: prima `GOVERNANCE` poi `ADVISORY` (l'elenco `OrganCategory`) e dentro la categoria per posizione, poi data di creazione, poi id; " +
+          "i membri seguono l'ordine del loro incarico. Con `category` solo gli organi di quella categoria. " +
+          "Il `id` di un membro è l'id della persona; `photo` è `null` se la persona non ha foto (o il media è stato cancellato). " +
+          "Nessun campo amministrativo (stato, posizione, date). Senza organi pubblicati `organs` è una lista vuota.",
+        parameters: [{ $ref: "#/components/parameters/OrganCategoryFilter" }],
+        responses: {
+          "200": {
+            description: "Gli organi pubblicati, in ordine.",
+            content: json(ref("OrganPublicList"), { example: { organs: [organPublicExample] } }),
+          },
+          "400": errorResponse("`category` non è una delle categorie ammesse (anche se vuoto).", CATEGORY_FILTER_ERROR),
+        },
+      },
+    },
+
+    "/api/public/people": {
+      get: {
+        tags: ["Governance e persone (pubblica)"],
+        operationId: "listPeoplePublic",
+        summary: "Persone pubblicate con un incarico",
+        description:
+          "Le persone `PUBLISHED` che hanno l'incarico `role`, nell'ordine dell'incarico (posizione, poi data di creazione, poi id). " +
+          "`title` è la carica di quell'incarico, per esempio \"Coordinatrice scientifica\". `role` è obbligatorio e ammette `PROMOTER`, `TEAM` o `AMBASSADOR`: " +
+          "assente, vuoto, `ORGAN_MEMBER` o fuori elenco risponde 400 (i membri degli organi si leggono da `GET /api/public/organs`). " +
+          "Nessun campo amministrativo. Senza persone pubblicate `people` è una lista vuota.",
+        parameters: [{ $ref: "#/components/parameters/PublicRoleFilter" }],
+        responses: {
+          "200": {
+            description: "Le persone pubblicate con quell'incarico, in ordine.",
+            content: json(ref("PersonPublicList"), { example: { people: [{ ...memberPublicExample, title: "Promotrice" }] } }),
+          },
+          "400": errorResponse("`role` manca, è vuoto, è `ORGAN_MEMBER` o non è uno degli incarichi ammessi.", PUBLIC_ROLE_ERROR),
+        },
+      },
+    },
+
+    "/api/admin/organs": {
+      get: {
+        tags: ["Organi (admin)"],
+        operationId: "listOrgans",
+        summary: "Elenco degli organi",
+        description:
+          "Tutti gli organi, bozze comprese, con posizione, stato, date e `memberCount` (gli incarichi nell'organo, anche di persone in bozza). " +
+          "Prima `GOVERNANCE` poi `ADVISORY`, dentro la categoria per posizione. Con `category` solo quelli di una categoria.",
+        security: bearer,
+        parameters: [{ $ref: "#/components/parameters/OrganCategoryFilter" }],
+        responses: {
+          "200": { description: "Gli organi, in ordine.", content: json(ref("OrganAdminList"), { example: { organs: [organAdminExample] } }) },
+          "400": errorResponse("`category` non è una delle categorie ammesse (anche se vuoto).", CATEGORY_FILTER_ERROR),
+          "401": response("Unauthorized"),
+        },
+      },
+      post: {
+        tags: ["Organi (admin)"],
+        operationId: "createOrgan",
+        summary: "Crea un organo",
+        description:
+          "Crea un organo, per default in bozza (`DRAFT`). Senza `position` va in fondo alla sua categoria (massimo attuale più uno, al massimo 9999). " +
+          "Con `status` `PUBLISHED` è subito pubblico e `publishedAt` è l'ora attuale. Il `name` è unico (confronto esatto dopo aver tolto gli spazi ai bordi): " +
+          "un nome già usato risponde 409, anche se due richieste arrivano insieme. Un campo non previsto è rifiutato con 400. " +
+          PEOPLE_TEXT_RULES,
+        security: bearer,
+        requestBody: {
+          required: true,
+          content: json(ref("OrganCreateRequest"), {
+            examples: {
+              governo: {
+                summary: "Un organo di governo pubblicato, con le funzioni",
+                value: {
+                  name: "Consiglio di amministrazione",
+                  category: "GOVERNANCE",
+                  description: "Guida la Fondazione e ne approva gli indirizzi.\n\nSi riunisce almeno quattro volte l'anno.",
+                  status: "PUBLISHED",
+                },
+              },
+              minimo: {
+                summary: "Solo i campi obbligatori (bozza, in fondo alla categoria, senza funzioni)",
+                value: { name: "Comitato scientifico", category: "ADVISORY" },
+              },
+            },
+          }),
+        },
+        responses: {
+          "201": { description: "Organo creato.", content: json(ref("OrganAdmin")) },
+          "400": errorResponse(
+            "Body non valido: campo obbligatorio mancante o vuoto, fuori limite, non previsto, nome su più righe, categoria, stato o posizione non ammessi " +
+              "oppure caratteri che non si possono salvare.",
+            "name is required",
+          ),
+          "401": response("Unauthorized"),
+          "409": response("DuplicateOrgan"),
+          "413": response("PayloadTooLarge"),
+        },
+      },
+    },
+
+    "/api/admin/organs/{id}": {
+      get: {
+        tags: ["Organi (admin)"],
+        operationId: "getOrgan",
+        summary: "Dettaglio di un organo con i membri",
+        description:
+          "Tutti i campi, anche per le bozze, più `members`: tutti i membri, anche le persone in bozza, in ordine. " +
+          "Ogni membro ha `roleId` (l'id dell'incarico), `status` (quello della persona) e `title` (la carica nell'organo).",
+        security: bearer,
+        parameters: [{ $ref: "#/components/parameters/Id" }],
+        responses: {
+          "200": { description: "L'organo con i suoi membri.", content: json(ref("OrganAdminDetail"), { example: organAdminDetailExample }) },
+          "401": response("Unauthorized"),
+          "404": response("NotFound"),
+        },
+      },
+      patch: {
+        tags: ["Organi (admin)"],
+        operationId: "updateOrgan",
+        summary: "Modifica un organo",
+        description:
+          "Cambia uno o più campi; quelli non inviati restano com'erano. `description: null` (o vuota) toglie le funzioni. " +
+          "Cambiando `category` senza `position`, l'organo va in fondo alla nuova categoria. " +
+          "Passando a `PUBLISHED` per la prima volta si imposta `publishedAt`; tornare a `DRAFT` ritira l'organo dal pubblico ma conserva la data. " +
+          "Rinominarlo con un nome già usato risponde 409 e non cambia nulla. " +
+          PEOPLE_TEXT_RULES,
+        security: bearer,
+        parameters: [{ $ref: "#/components/parameters/Id" }],
+        requestBody: {
+          required: true,
+          content: json(ref("OrganUpdateRequest"), {
+            examples: {
+              pubblica: { summary: "Pubblica un organo", value: { status: "PUBLISHED" } },
+              sposta: { summary: "Sposta un organo tra i consultivi, in fondo", value: { category: "ADVISORY" } },
+              correggi: {
+                summary: "Corregge le funzioni e cambia l'ordine",
+                value: { description: "Funzioni aggiornate dell'organo.", position: 2 },
+              },
+            },
+          }),
+        },
+        responses: {
+          "200": { description: "L'organo aggiornato.", content: json(ref("OrganAdmin")) },
+          "400": errorResponse(
+            "Body non valido: nessun campo da cambiare, campo non previsto, nome vuoto, fuori limite o su più righe, categoria, stato o posizione non ammessi " +
+              "oppure caratteri che non si possono salvare.",
+            "nothing to change",
+          ),
+          "401": response("Unauthorized"),
+          "404": response("NotFound"),
+          "409": response("DuplicateOrgan"),
+          "413": response("PayloadTooLarge"),
+        },
+      },
+      delete: {
+        tags: ["Organi (admin)"],
+        operationId: "deleteOrgan",
+        summary: "Elimina un organo",
+        description:
+          "Elimina l'organo e anche gli incarichi delle persone in quell'organo; le persone restano. " +
+          "Se due richieste lo eliminano insieme, una risponde 204 e l'altra 404.",
+        security: bearer,
+        parameters: [{ $ref: "#/components/parameters/Id" }],
+        responses: {
+          "204": { description: "Organo eliminato, nessun contenuto." },
+          "401": response("Unauthorized"),
+          "404": response("NotFound"),
+        },
+      },
+    },
+
+    "/api/admin/people": {
+      get: {
+        tags: ["Persone (admin)"],
+        operationId: "listPeople",
+        summary: "Elenco delle persone",
+        description:
+          "Tutte le persone, bozze comprese, con foto risolta e incarichi. Filtri facoltativi: `role` (anche `ORGAN_MEMBER`: chi ha almeno un incarico di quel tipo) e `status`. " +
+          "Un valore fuori elenco, anche vuoto, risponde 400; un filtro ripetuto vale l'ultimo.",
+        security: bearer,
+        parameters: [{ $ref: "#/components/parameters/AdminRoleFilter" }, { $ref: "#/components/parameters/PersonStatusFilter" }],
+        responses: {
+          "200": { description: "Le persone.", content: json(ref("PersonAdminList"), { example: { people: [personAdminExample] } }) },
+          "400": errorResponse("`role` o `status` non sono uno dei valori ammessi (anche se vuoti).", ROLE_FILTER_ERROR),
+          "401": response("Unauthorized"),
+        },
+      },
+      post: {
+        tags: ["Persone (admin)"],
+        operationId: "createPerson",
+        summary: "Crea una persona con i suoi incarichi",
+        description:
+          "Crea una persona, per default in bozza (`DRAFT`), e i suoi incarichi in una sola transazione. Con `status` `PUBLISHED` è subito pubblica e `publishedAt` è l'ora attuale. " +
+          "`photoId` è un media esistente di tipo immagine (non un PDF): altrimenti 400. Un campo non previsto è rifiutato con 400. " +
+          ROLES_RULES +
+          PEOPLE_TEXT_RULES,
+        security: bearer,
+        requestBody: {
+          required: true,
+          content: json(ref("PersonCreateRequest"), {
+            examples: {
+              promotore: {
+                summary: "Una promotrice pubblicata che presiede anche un organo",
+                value: {
+                  name: "Anna Rossi",
+                  bio: "Fisica e docente, ha promosso la nascita della Fondazione.",
+                  status: "PUBLISHED",
+                  roles: [
+                    { kind: "PROMOTER", title: "Promotrice" },
+                    { kind: "ORGAN_MEMBER", organId: ORGAN_ID, title: "Presidente" },
+                  ],
+                },
+              },
+              team: {
+                summary: "Un membro del team, in bozza, con posizione scelta",
+                value: { name: "Luca Bianchi", roles: [{ kind: "TEAM", title: "Coordinatore scientifico", position: 1 }] },
+              },
+              minima: { summary: "Solo il nome (bozza, senza incarichi)", value: { name: "Marta Verdi" } },
+            },
+          }),
+        },
+        responses: {
+          "201": { description: "Persona creata.", content: json(ref("PersonAdmin")) },
+          "400": errorResponse(
+            "Body non valido: nome mancante, vuoto o su più righe, fuori limite, campo non previsto, foto o organo inesistenti, foto che non è un'immagine, " +
+              "incarichi non validi (troppi, doppioni, `organId` mancante per `ORGAN_MEMBER` o non ammesso per gli altri) oppure caratteri che non si possono salvare.",
+            "organId is required for ORGAN_MEMBER",
+          ),
+          "401": response("Unauthorized"),
+          "409": response("DuplicateRole"),
+          "413": response("PayloadTooLarge"),
+        },
+      },
+    },
+
+    "/api/admin/people/{id}": {
+      get: {
+        tags: ["Persone (admin)"],
+        operationId: "getPerson",
+        summary: "Dettaglio di una persona",
+        description: "Tutti i campi, anche per le bozze, con la foto risolta e gli incarichi (`organName` è il nome dell'organo per `ORGAN_MEMBER`).",
+        security: bearer,
+        parameters: [{ $ref: "#/components/parameters/Id" }],
+        responses: {
+          "200": { description: "La persona.", content: json(ref("PersonAdmin"), { example: personAdminExample }) },
+          "401": response("Unauthorized"),
+          "404": response("NotFound"),
+        },
+      },
+      patch: {
+        tags: ["Persone (admin)"],
+        operationId: "updatePerson",
+        summary: "Modifica una persona e i suoi incarichi",
+        description:
+          "Cambia uno o più campi tra `name`, `bio`, `photoId`, `status` e `roles`; quelli non inviati restano com'erano. `bio: null` toglie la biografia, `photoId: null` la foto. " +
+          "`roles` sostituisce per intero gli incarichi esistenti, in una sola transazione con il resto della modifica; " +
+          "un incarico che resta uguale (stesso `kind` e `organId`) conserva la sua `position` se non ne viene indicata una nuova, e `roles: []` li toglie tutti. " +
+          "Passando a `PUBLISHED` per la prima volta si imposta `publishedAt`; tornare a `DRAFT` ritira la persona dal pubblico ma conserva la data. " +
+          ROLES_RULES +
+          PEOPLE_TEXT_RULES,
+        security: bearer,
+        parameters: [{ $ref: "#/components/parameters/Id" }],
+        requestBody: {
+          required: true,
+          content: json(ref("PersonUpdateRequest"), {
+            examples: {
+              pubblica: { summary: "Pubblica una persona", value: { status: "PUBLISHED" } },
+              biografia: { summary: "Corregge la biografia e toglie la foto", value: { bio: "Biografia aggiornata.", photoId: null } },
+              incarichi: {
+                summary: "Sostituisce gli incarichi: promotrice e membro di un organo",
+                value: {
+                  roles: [
+                    { kind: "PROMOTER", title: "Promotrice" },
+                    { kind: "ORGAN_MEMBER", organId: ORGAN_ID, title: "Vicepresidente" },
+                  ],
+                },
+              },
+            },
+          }),
+        },
+        responses: {
+          "200": { description: "La persona aggiornata.", content: json(ref("PersonAdmin")) },
+          "400": errorResponse(
+            "Body non valido: nessun campo da cambiare, campo non previsto, nome vuoto, fuori limite o su più righe, foto o organo inesistenti, " +
+              "foto che non è un'immagine, incarichi non validi oppure caratteri che non si possono salvare.",
+            "nothing to change",
+          ),
+          "401": response("Unauthorized"),
+          "404": response("NotFound"),
+          "409": response("DuplicateRole"),
+          "413": response("PayloadTooLarge"),
+        },
+      },
+      delete: {
+        tags: ["Persone (admin)"],
+        operationId: "deletePerson",
+        summary: "Elimina una persona",
+        description:
+          "Elimina la persona e i suoi incarichi; gli organi restano e la foto resta tra i media. " +
+          "Se due richieste la eliminano insieme, una risponde 204 e l'altra 404.",
+        security: bearer,
+        parameters: [{ $ref: "#/components/parameters/Id" }],
+        responses: {
+          "204": { description: "Persona eliminata, nessun contenuto." },
+          "401": response("Unauthorized"),
+          "404": response("NotFound"),
+        },
+      },
+    },
   },
 
   components: {
@@ -1066,6 +1468,38 @@ export const openApiSpec = {
           "Un valore fuori elenco (anche vuoto) risponde 400; ripetuto, vale l'ultimo.",
         schema: ref("WordPage"),
       },
+      OrganCategoryFilter: {
+        name: "category",
+        in: "query",
+        required: false,
+        description:
+          "Solo gli organi di questa categoria. Senza il parametro, tutte le categorie nell'ordine dell'elenco. " +
+          "Un valore fuori elenco (anche vuoto) risponde 400; ripetuto, vale l'ultimo.",
+        schema: ref("OrganCategory"),
+      },
+      PublicRoleFilter: {
+        name: "role",
+        in: "query",
+        required: true,
+        description:
+          "L'incarico delle persone da elencare: `PROMOTER`, `TEAM` o `AMBASSADOR`. Obbligatorio: assente, vuoto, `ORGAN_MEMBER` o fuori elenco risponde 400; ripetuto, vale l'ultimo.",
+        schema: ref("PublicPersonRoleKind"),
+      },
+      AdminRoleFilter: {
+        name: "role",
+        in: "query",
+        required: false,
+        description:
+          "Solo le persone con almeno un incarico di questo tipo (anche `ORGAN_MEMBER`). Un valore fuori elenco (anche vuoto) risponde 400; ripetuto, vale l'ultimo.",
+        schema: ref("PersonRoleKind"),
+      },
+      PersonStatusFilter: {
+        name: "status",
+        in: "query",
+        required: false,
+        description: "Solo le persone con questo stato. Un valore fuori elenco (anche vuoto) risponde 400; ripetuto, vale l'ultimo.",
+        schema: ref("ContentStatus"),
+      },
     },
 
     responses: {
@@ -1076,6 +1510,14 @@ export const openApiSpec = {
       DuplicateWord: errorResponse(
         "Esiste già una parola con questo termine nella stessa pagina (confronto esatto, dopo aver tolto gli spazi ai bordi).",
         "a word with this term already exists on this page",
+      ),
+      DuplicateOrgan: errorResponse(
+        "Esiste già un organo con questo nome (confronto esatto, dopo aver tolto gli spazi ai bordi), anche se creato da una richiesta simultanea.",
+        "an organ with this name already exists",
+      ),
+      DuplicateRole: errorResponse(
+        "Lo stesso incarico (stesso `kind` e stesso `organId`) scritto da due richieste simultanee per la stessa persona.",
+        "duplicate role",
       ),
       TooManyRequests: {
         description: "Troppi tentativi di login: riprova dopo i secondi indicati in `Retry-After`.",
@@ -1626,6 +2068,260 @@ export const openApiSpec = {
         type: "object",
         required: ["words"],
         properties: { words: { type: "array", items: ref("WordAdmin"), description: "Tutte le parole, in ordine." } },
+      },
+      OrganCategory: {
+        type: "string",
+        description: "`GOVERNANCE`: organi di governo (pagina Governance). `ADVISORY`: comitati e consigli consultivi.",
+        enum: [...ORGAN_CATEGORIES],
+      },
+      PersonRoleKind: {
+        type: "string",
+        description: "Tipo di incarico: `PROMOTER`, `TEAM`, `AMBASSADOR` oppure `ORGAN_MEMBER` (membro di un organo, con `organId`).",
+        enum: [...PERSON_ROLE_KINDS],
+      },
+      PublicPersonRoleKind: {
+        type: "string",
+        description: "Gli incarichi che si leggono dall'elenco pubblico delle persone (i membri degli organi si leggono dagli organi).",
+        enum: [...PUBLIC_PERSON_ROLE_KINDS],
+      },
+      PersonPhoto: {
+        type: "object",
+        description: "La foto di una persona.",
+        required: ["id", "url", "alt"],
+        properties: {
+          id: { type: "string", format: "uuid", example: MEDIA_ID },
+          url: {
+            type: "string",
+            nullable: true,
+            description: "Indirizzo pubblico del file; `null` se non è configurata la base degli indirizzi pubblici.",
+            example: PERSON_PHOTO_URL,
+          },
+          alt: { type: "string", nullable: true, example: "Ritratto di Anna Rossi" },
+        },
+      },
+      MemberPublic: {
+        type: "object",
+        description: "Una persona in una lista del sito: `id` è l'id della persona, `title` la carica di quell'incarico.",
+        required: ["id", "name", "bio", "photo", "title"],
+        properties: {
+          id: { type: "string", format: "uuid", example: PERSON_ID },
+          name: { type: "string", example: "Anna Rossi" },
+          bio: { type: "string", nullable: true, description: "Biografia; `null` se manca. Una riga vuota separa i paragrafi.", example: memberPublicExample.bio },
+          photo: nullableRef("PersonPhoto", "La foto, se c'è; altrimenti `null`."),
+          title: { type: "string", nullable: true, description: "La carica o il ruolo; `null` se non indicata.", example: "Presidente" },
+        },
+      },
+      OrganPublic: {
+        type: "object",
+        required: ["id", "name", "category", "description", "members"],
+        properties: {
+          id: { type: "string", format: "uuid", example: ORGAN_ID },
+          name: { type: "string", example: "Consiglio di amministrazione" },
+          category: ref("OrganCategory"),
+          description: { type: "string", nullable: true, description: "Le funzioni dell'organo; `null` se mancano.", example: organPublicExample.description },
+          members: { type: "array", items: ref("MemberPublic"), description: "I membri pubblicati, in ordine." },
+        },
+      },
+      OrganAdmin: {
+        type: "object",
+        required: ["id", "name", "category", "description", "position", "status", "publishedAt", "createdAt", "updatedAt", "memberCount"],
+        properties: {
+          id: { type: "string", format: "uuid", example: ORGAN_ID },
+          name: { type: "string", example: "Consiglio di amministrazione" },
+          category: ref("OrganCategory"),
+          description: { type: "string", nullable: true, description: "Le funzioni dell'organo; `null` se mancano.", example: organPublicExample.description },
+          position: {
+            type: "integer",
+            minimum: 0,
+            maximum: 9999,
+            description: "Ordine nella categoria; a parità vale la data di creazione, poi l'id.",
+            example: 0,
+          },
+          status: ref("ContentStatus"),
+          publishedAt: {
+            type: "string",
+            format: "date-time",
+            nullable: true,
+            description: "Quando l'organo è stato pubblicato per la prima volta; non si azzera più.",
+          },
+          createdAt: { type: "string", format: "date-time" },
+          updatedAt: { type: "string", format: "date-time" },
+          memberCount: { type: "integer", minimum: 0, description: "Gli incarichi in questo organo, anche di persone in bozza.", example: 1 },
+        },
+      },
+      OrganMemberAdmin: {
+        allOf: [
+          ref("MemberPublic"),
+          {
+            type: "object",
+            required: ["roleId", "status"],
+            properties: {
+              roleId: { type: "string", format: "uuid", description: "L'id dell'incarico della persona in questo organo.", example: ROLE_ID },
+              status: { allOf: [ref("ContentStatus")], description: "Lo stato della persona." },
+            },
+          },
+        ],
+      },
+      OrganAdminDetail: {
+        allOf: [
+          ref("OrganAdmin"),
+          {
+            type: "object",
+            required: ["members"],
+            properties: { members: { type: "array", items: ref("OrganMemberAdmin"), description: "Tutti i membri, anche in bozza, in ordine." } },
+          },
+        ],
+      },
+      OrganCreateRequest: {
+        type: "object",
+        required: ["name", "category"],
+        additionalProperties: false,
+        properties: {
+          name: { type: "string", maxLength: 160, description: "Il nome, su una sola riga e unico.", example: "Consiglio di amministrazione" },
+          category: ref("OrganCategory"),
+          description: {
+            type: "string",
+            nullable: true,
+            maxLength: 3000,
+            description: "Le funzioni dell'organo, facoltative: `null` o vuota vale \"nessuna\".",
+          },
+          position: {
+            type: "integer",
+            minimum: 0,
+            maximum: 9999,
+            description: "Ordine nella categoria. Se manca, l'organo va in fondo alla categoria.",
+          },
+          status: { allOf: [ref("ContentStatus")], description: "Stato di pubblicazione. Se manca, un nuovo organo è `DRAFT`." },
+        },
+      },
+      OrganUpdateRequest: {
+        type: "object",
+        description: "Almeno un campo. I campi non inviati non cambiano.",
+        minProperties: 1,
+        additionalProperties: false,
+        properties: {
+          name: { type: "string", maxLength: 160, description: "Il nome, su una sola riga e unico." },
+          category: ref("OrganCategory"),
+          description: { type: "string", nullable: true, maxLength: 3000, description: "`null` o vuota toglie le funzioni." },
+          position: {
+            type: "integer",
+            minimum: 0,
+            maximum: 9999,
+            description: "Ordine nella categoria. Cambiando categoria senza `position`, l'organo va in fondo alla nuova categoria.",
+          },
+          status: ref("ContentStatus"),
+        },
+      },
+      OrganPublicList: {
+        type: "object",
+        required: ["organs"],
+        properties: { organs: { type: "array", items: ref("OrganPublic"), description: "Gli organi pubblicati, in ordine." } },
+      },
+      OrganAdminList: {
+        type: "object",
+        required: ["organs"],
+        properties: { organs: { type: "array", items: ref("OrganAdmin"), description: "Tutti gli organi, in ordine." } },
+      },
+      PersonPublicList: {
+        type: "object",
+        required: ["people"],
+        properties: { people: { type: "array", items: ref("MemberPublic"), description: "Le persone pubblicate con l'incarico richiesto, in ordine." } },
+      },
+      PersonRoleAdmin: {
+        type: "object",
+        description: "Un incarico di una persona.",
+        required: ["id", "kind", "organId", "organName", "title", "position"],
+        properties: {
+          id: { type: "string", format: "uuid", example: ROLE_ID },
+          kind: ref("PersonRoleKind"),
+          organId: { type: "string", format: "uuid", nullable: true, description: "L'organo, solo per `ORGAN_MEMBER`; altrimenti `null`.", example: ORGAN_ID },
+          organName: { type: "string", nullable: true, description: "Il nome dell'organo; `null` se `organId` è `null`.", example: "Consiglio di amministrazione" },
+          title: { type: "string", nullable: true, description: "La carica o il ruolo; `null` se non indicata.", example: "Presidente" },
+          position: { type: "integer", minimum: 0, maximum: 9999, description: "Ordine nella lista dell'incarico.", example: 0 },
+        },
+      },
+      PersonAdmin: {
+        type: "object",
+        required: ["id", "name", "bio", "photo", "status", "publishedAt", "createdAt", "updatedAt", "roles"],
+        properties: {
+          id: { type: "string", format: "uuid", example: PERSON_ID },
+          name: { type: "string", example: "Anna Rossi" },
+          bio: { type: "string", nullable: true, description: "Biografia; `null` se manca. Una riga vuota separa i paragrafi.", example: memberPublicExample.bio },
+          photo: nullableRef("PersonPhoto", "La foto, se c'è (e il media non è stato cancellato); altrimenti `null`."),
+          status: ref("ContentStatus"),
+          publishedAt: {
+            type: "string",
+            format: "date-time",
+            nullable: true,
+            description: "Quando la persona è stata pubblicata per la prima volta; non si azzera più.",
+          },
+          createdAt: { type: "string", format: "date-time" },
+          updatedAt: { type: "string", format: "date-time" },
+          roles: { type: "array", items: ref("PersonRoleAdmin"), description: "Gli incarichi della persona." },
+        },
+      },
+      PersonRoleRequest: {
+        type: "object",
+        description: "Un incarico nell'elenco `roles` di una richiesta.",
+        required: ["kind"],
+        additionalProperties: false,
+        properties: {
+          kind: ref("PersonRoleKind"),
+          organId: {
+            type: "string",
+            format: "uuid",
+            nullable: true,
+            description: "Un organo esistente. Obbligatorio se e solo se `kind` è `ORGAN_MEMBER`.",
+            example: ORGAN_ID,
+          },
+          title: { type: "string", nullable: true, maxLength: 120, description: "La carica o il ruolo, su una sola riga, facoltativa.", example: "Presidente" },
+          position: {
+            type: "integer",
+            minimum: 0,
+            maximum: 9999,
+            description: "Ordine nella lista dell'incarico. Se manca va in fondo, tranne in modifica per un incarico che resta uguale, che conserva la posizione.",
+          },
+        },
+      },
+      PersonCreateRequest: {
+        type: "object",
+        required: ["name"],
+        additionalProperties: false,
+        properties: {
+          name: { type: "string", maxLength: 120, description: "Nome e cognome, su una sola riga (non è unico).", example: "Anna Rossi" },
+          bio: { type: "string", nullable: true, maxLength: 3000, description: "Biografia, facoltativa: `null` o vuota vale \"nessuna\"." },
+          photoId: {
+            type: "string",
+            format: "uuid",
+            nullable: true,
+            description: "Id di un media già registrato, di tipo immagine (non PDF), usato come foto.",
+          },
+          status: { allOf: [ref("ContentStatus")], description: "Stato di pubblicazione. Se manca, una nuova persona è `DRAFT`." },
+          roles: { type: "array", maxItems: 20, items: ref("PersonRoleRequest"), description: "Gli incarichi (massimo 20). Se manca, nessuno." },
+        },
+      },
+      PersonUpdateRequest: {
+        type: "object",
+        description: "Almeno un campo. I campi non inviati non cambiano.",
+        minProperties: 1,
+        additionalProperties: false,
+        properties: {
+          name: { type: "string", maxLength: 120, description: "Nome e cognome, su una sola riga." },
+          bio: { type: "string", nullable: true, maxLength: 3000, description: "`null` o vuota toglie la biografia." },
+          photoId: { type: "string", format: "uuid", nullable: true, description: "Un media immagine esistente; `null` toglie la foto." },
+          status: ref("ContentStatus"),
+          roles: {
+            type: "array",
+            maxItems: 20,
+            items: ref("PersonRoleRequest"),
+            description: "L'elenco completo degli incarichi (massimo 20): sostituisce per intero quelli esistenti; `[]` li toglie tutti.",
+          },
+        },
+      },
+      PersonAdminList: {
+        type: "object",
+        required: ["people"],
+        properties: { people: { type: "array", items: ref("PersonAdmin"), description: "Le persone." } },
       },
     },
   },

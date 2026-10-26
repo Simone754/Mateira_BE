@@ -26,6 +26,17 @@ import {
   TICKER_TEXT_MAX,
 } from "../src/modules/home/service";
 import { newObjectKey } from "../src/modules/media/service";
+import { ORGAN_CATEGORIES } from "../src/modules/organs/dto";
+import {
+  BIO_MAX,
+  ORGAN_DESCRIPTION_MAX,
+  ORGAN_NAME_MAX,
+  PERSON_NAME_MAX,
+  POSITION_MAX as PEOPLE_POSITION_MAX,
+  ROLES_MAX,
+  ROLE_TITLE_MAX,
+} from "../src/modules/organs/service";
+import { PERSON_ROLE_KINDS, PUBLIC_PERSON_ROLE_KINDS } from "../src/modules/people/dto";
 import { WORD_PAGES } from "../src/modules/words/dto";
 import { CLOSING_MAX, ETYMOLOGY_MAX, MEANING_MAX, POSITION_MAX, TERM_MAX } from "../src/modules/words/service";
 import { prisma } from "../src/plugins/prisma";
@@ -47,6 +58,9 @@ after(async () => {
 });
 
 const swaggerDir = path.dirname(require.resolve("swagger-ui-dist/package.json"));
+
+/** The sample organ id the documented person examples use; the test swaps in a real one. */
+const DOC_ORGAN_ID = "9d4e1f7a-6b2c-4a83-b5d0-3c8e2f1a7b64";
 
 const ASSETS: [name: string, contentType: string][] = [
   ["swagger-ui.css", "text/css"],
@@ -87,6 +101,18 @@ const ROUTES = [
   "GET /api/admin/words/{id}",
   "PATCH /api/admin/words/{id}",
   "DELETE /api/admin/words/{id}",
+  "GET /api/public/organs",
+  "GET /api/public/people",
+  "GET /api/admin/organs",
+  "POST /api/admin/organs",
+  "GET /api/admin/organs/{id}",
+  "PATCH /api/admin/organs/{id}",
+  "DELETE /api/admin/organs/{id}",
+  "GET /api/admin/people",
+  "POST /api/admin/people",
+  "GET /api/admin/people/{id}",
+  "PATCH /api/admin/people/{id}",
+  "DELETE /api/admin/people/{id}",
 ];
 
 // The admin routes that are open on purpose: they are how a session starts, renews and ends.
@@ -139,7 +165,7 @@ test("GET /openapi.json serves the OpenAPI 3.0.3 document with every route", asy
   assert.deepEqual(operationsOf(res.json).map((o) => o.key).sort(), [...ROUTES].sort());
   assert.deepEqual(
     res.json.tags.map((tag: { name: string }) => tag.name),
-    ["Sistema", "Autenticazione", "Media", "News (admin)", "News (pubbliche)", "Home (admin)", "Home (pubblica)", "Parole (admin)", "Parole (pubblica)"],
+    ["Sistema", "Autenticazione", "Media", "News (admin)", "News (pubbliche)", "Home (admin)", "Home (pubblica)", "Parole (admin)", "Parole (pubblica)", "Organi (admin)", "Persone (admin)", "Governance e persone (pubblica)"],
   );
   assert.deepEqual(res.json, JSON.parse(JSON.stringify(openApiSpec)));
 });
@@ -233,7 +259,10 @@ test("the list filters are not prefilled: no example or default on category and 
   assert.deepEqual(checked.sort(), [
     "GET /api/admin/news category",
     "GET /api/admin/news status",
+    "GET /api/admin/organs category",
+    "GET /api/admin/people status",
     "GET /api/public/news category",
+    "GET /api/public/organs category",
   ]);
 
   // The paging parameters keep their documented defaults.
@@ -471,6 +500,9 @@ const BARE_REQUEST_STATUS: Record<string, number> = {
   "GET /api/public/news": 200,
   "GET /api/public/home": 200,
   "GET /api/public/words": 200,
+  "GET /api/public/organs": 200,
+  // `role` is required on the public list of people.
+  "GET /api/public/people": 400,
 };
 
 // An additional guard only: the admin routers answer 401 before they look at the path, so this does not prove that a
@@ -519,6 +551,14 @@ type Context = {
   createdBlockId: string;
   /** A published word on the page "mateira", made before the calls. */
   wordId: string;
+  /** A published governing organ with one published member, made before the calls. */
+  organId: string;
+  /** The organ the POST call creates (it has no members). */
+  createdOrganId: string;
+  /** A published promoter and member of the organ, made before the calls. */
+  personId: string;
+  /** The person the POST call creates. */
+  createdPersonId: string;
 };
 
 type Call = {
@@ -687,6 +727,84 @@ const CALLS: Call[] = [
     send: (r, ctx) => r("PATCH", `/api/admin/words/${ctx.wordId}`, { token: ctx.token, body: { closing: "Frase conclusiva." } }),
     then: (res) => assert.equal(res.json.closing, "Frase conclusiva."),
   },
+  {
+    key: "GET /api/public/organs",
+    status: 200,
+    send: (r) => r("GET", "/api/public/organs?category=GOVERNANCE"),
+    then: (res, ctx) => {
+      const organ = res.json.organs.find((o: { id: string }) => o.id === ctx.organId);
+      assert.deepEqual(organ.members.map((m: { id: string }) => m.id), [ctx.personId]);
+    },
+  },
+  {
+    key: "GET /api/public/people",
+    status: 200,
+    send: (r) => r("GET", "/api/public/people?role=PROMOTER"),
+    then: (res, ctx) => assert.deepEqual(res.json.people.map((p: { id: string }) => p.id), [ctx.personId]),
+  },
+  {
+    key: "GET /api/admin/organs",
+    status: 200,
+    send: (r, ctx) => r("GET", "/api/admin/organs", { token: ctx.token }),
+    then: (res, ctx) => assert.equal(res.json.organs.find((o: { id: string }) => o.id === ctx.organId).memberCount, 1),
+  },
+  {
+    key: "POST /api/admin/organs",
+    status: 201,
+    send: (r, ctx) =>
+      r("POST", "/api/admin/organs", {
+        token: ctx.token,
+        body: { name: "Creato dal test", category: "ADVISORY", description: "Funzioni dell'organo." },
+      }),
+    then: (res, ctx) => {
+      ctx.createdOrganId = res.json.id;
+    },
+  },
+  {
+    key: "GET /api/admin/organs/{id}",
+    status: 200,
+    send: (r, ctx) => r("GET", `/api/admin/organs/${ctx.organId}`, { token: ctx.token }),
+    then: (res, ctx) => {
+      assert.equal(res.json.members.length, 1);
+      assert.equal(res.json.members[0].id, ctx.personId);
+    },
+  },
+  {
+    key: "PATCH /api/admin/organs/{id}",
+    status: 200,
+    send: (r, ctx) => r("PATCH", `/api/admin/organs/${ctx.organId}`, { token: ctx.token, body: { description: "Funzioni aggiornate." } }),
+    then: (res) => assert.equal(res.json.description, "Funzioni aggiornate."),
+  },
+  {
+    key: "GET /api/admin/people",
+    status: 200,
+    send: (r, ctx) => r("GET", "/api/admin/people?role=ORGAN_MEMBER&status=PUBLISHED", { token: ctx.token }),
+    then: (res, ctx) => assert.ok(res.json.people.some((p: { id: string }) => p.id === ctx.personId)),
+  },
+  {
+    key: "POST /api/admin/people",
+    status: 201,
+    send: (r, ctx) =>
+      r("POST", "/api/admin/people", {
+        token: ctx.token,
+        body: { name: "Creata dal test", roles: [{ kind: "ORGAN_MEMBER", organId: ctx.organId, title: "Membro" }] },
+      }),
+    then: (res, ctx) => {
+      ctx.createdPersonId = res.json.id;
+    },
+  },
+  {
+    key: "GET /api/admin/people/{id}",
+    status: 200,
+    send: (r, ctx) => r("GET", `/api/admin/people/${ctx.personId}`, { token: ctx.token }),
+    then: (res, ctx) => assert.equal(res.json.id, ctx.personId),
+  },
+  {
+    key: "PATCH /api/admin/people/{id}",
+    status: 200,
+    send: (r, ctx) => r("PATCH", `/api/admin/people/${ctx.personId}`, { token: ctx.token, body: { bio: "Biografia aggiornata." } }),
+    then: (res) => assert.equal(res.json.bio, "Biografia aggiornata."),
+  },
   { key: "POST /api/admin/auth/logout", status: 204, send: (r, ctx) => r("POST", "/api/admin/auth/logout", { cookie: ctx.cookie }) },
   {
     key: "DELETE /api/admin/news/{id}",
@@ -702,6 +820,16 @@ const CALLS: Call[] = [
     key: "DELETE /api/admin/words/{id}",
     status: 204,
     send: (r, ctx) => r("DELETE", `/api/admin/words/${ctx.wordId}`, { token: ctx.token }),
+  },
+  {
+    key: "DELETE /api/admin/people/{id}",
+    status: 204,
+    send: (r, ctx) => r("DELETE", `/api/admin/people/${ctx.createdPersonId}`, { token: ctx.token }),
+  },
+  {
+    key: "DELETE /api/admin/organs/{id}",
+    status: 204,
+    send: (r, ctx) => r("DELETE", `/api/admin/organs/${ctx.createdOrganId}`, { token: ctx.token }),
   },
   {
     key: "DELETE /api/admin/media/{id}",
@@ -749,6 +877,28 @@ test("every documented operation answers on the real router with a status the do
       publishedAt: new Date("2026-10-01T09:00:00Z"),
     },
   });
+  const organ = await prisma.organ.create({
+    data: {
+      name: "Consiglio di prova",
+      category: "GOVERNANCE",
+      position: 0,
+      status: "PUBLISHED",
+      publishedAt: new Date("2026-10-01T09:00:00Z"),
+    },
+  });
+  const person = await prisma.person.create({
+    data: {
+      name: "Persona di prova",
+      status: "PUBLISHED",
+      publishedAt: new Date("2026-10-01T09:00:00Z"),
+      roles: {
+        create: [
+          { kind: "PROMOTER", title: "Promotrice", position: 0 },
+          { kind: "ORGAN_MEMBER", organId: organ.id, title: "Presidente", position: 0 },
+        ],
+      },
+    },
+  });
   const ctx: Context = {
     token,
     cookie,
@@ -758,6 +908,10 @@ test("every documented operation answers on the real router with a status the do
     blockId: block.id,
     createdBlockId: "",
     wordId: word.id,
+    organId: organ.id,
+    createdOrganId: "",
+    personId: person.id,
+    createdPersonId: "",
   };
 
   const documented = new Map(operationsOf(openApiSpec).map((o) => [o.key, o.op]));
@@ -792,7 +946,9 @@ test("an unknown id or slug answers 404 on every route that takes one", async ()
         ? { status: "PUBLISHED" }
         : pathName.includes("/words/")
           ? { meaning: "Testo" }
-          : { title: "Titolo" };
+          : pathName.includes("/organs/") || pathName.includes("/people/")
+            ? { name: "Nome" }
+            : { title: "Titolo" };
     const body = method === "PATCH" ? patchBody : undefined;
     const res = await request(method, url, { token, body });
     assertDocumentedAnswer(key, op, res.status);
@@ -800,7 +956,7 @@ test("an unknown id or slug answers 404 on every route that takes one", async ()
     assert.deepEqual(res.json, { error: "Not found" }, key);
     checked++;
   }
-  assert.equal(checked, 12);
+  assert.equal(checked, 18);
 });
 
 test("the documented Home request examples are accepted by the real router", async () => {
@@ -1160,4 +1316,194 @@ test("real word answers, a null closing included, match the documented response 
   assert.ok(page);
   assert.equal(adminWord(withoutPage), false);
   assert.equal(adminWord({ ...one, page: "news" }), false);
+});
+
+test("the limits written in the organ and people schemas are the ones the code enforces", () => {
+  const schemas: any = openApiSpec.components.schemas;
+  assert.deepEqual(schemas.OrganCategory.enum, [...ORGAN_CATEGORIES]);
+  assert.deepEqual(schemas.PersonRoleKind.enum, [...PERSON_ROLE_KINDS]);
+  assert.deepEqual(schemas.PublicPersonRoleKind.enum, [...PUBLIC_PERSON_ROLE_KINDS]);
+
+  for (const name of ["OrganCreateRequest", "OrganUpdateRequest"]) {
+    const properties = schemas[name].properties;
+    assert.equal(properties.name.maxLength, ORGAN_NAME_MAX, name);
+    assert.equal(properties.description.maxLength, ORGAN_DESCRIPTION_MAX, name);
+    assert.equal(properties.position.minimum, 0, name);
+    assert.equal(properties.position.maximum, PEOPLE_POSITION_MAX, name);
+    assert.equal(schemas[name].additionalProperties, false, name);
+  }
+  assert.deepEqual(schemas.OrganCreateRequest.required, ["name", "category"]);
+  assert.equal(schemas.OrganUpdateRequest.required, undefined);
+  assert.equal(schemas.OrganUpdateRequest.minProperties, 1);
+
+  for (const name of ["PersonCreateRequest", "PersonUpdateRequest"]) {
+    const properties = schemas[name].properties;
+    assert.equal(properties.name.maxLength, PERSON_NAME_MAX, name);
+    assert.equal(properties.bio.maxLength, BIO_MAX, name);
+    assert.equal(properties.roles.maxItems, ROLES_MAX, name);
+    assert.equal(schemas[name].additionalProperties, false, name);
+  }
+  assert.deepEqual(schemas.PersonCreateRequest.required, ["name"]);
+  assert.equal(schemas.PersonUpdateRequest.required, undefined);
+  assert.equal(schemas.PersonUpdateRequest.minProperties, 1);
+
+  const role = schemas.PersonRoleRequest;
+  assert.deepEqual(role.required, ["kind"]);
+  assert.equal(role.additionalProperties, false);
+  assert.equal(role.properties.title.maxLength, ROLE_TITLE_MAX);
+  assert.equal(role.properties.position.minimum, 0);
+  assert.equal(role.properties.position.maximum, PEOPLE_POSITION_MAX);
+});
+
+test("the organ, role and status filters are not prefilled and the documented 400s are what the router answers", async () => {
+  const { token } = await loginAsAdmin(request);
+  const paths: any = openApiSpec.paths;
+  for (const [pathName, names] of [
+    ["/api/public/organs", ["category"]],
+    ["/api/admin/organs", ["category"]],
+    ["/api/public/people", ["role"]],
+    ["/api/admin/people", ["role", "status"]],
+  ] as [string, string[]][]) {
+    const parameters = paths[pathName].get.parameters.map(resolved);
+    assert.deepEqual(parameters.map((p: any) => p.name), names, pathName);
+    for (const parameter of parameters) {
+      assert.equal(parameter.in, "query");
+      assert.equal(parameter.required, pathName === "/api/public/people", `${pathName} ${parameter.name}`);
+      for (const node of [parameter, resolved(parameter.schema)]) {
+        for (const keyword of ["example", "examples", "default"]) assert.equal(node[keyword], undefined, `${pathName} ${keyword}`);
+      }
+    }
+  }
+
+  const cases: [string, string, boolean][] = [
+    ["/api/public/organs?category=NOPE", "/api/public/organs", false],
+    ["/api/admin/organs?category=NOPE", "/api/admin/organs", true],
+    ["/api/public/people", "/api/public/people", false],
+    ["/api/admin/people?role=NOPE", "/api/admin/people", true],
+  ];
+  for (const [url, pathName, admin] of cases) {
+    const res = await request("GET", url, admin ? { token } : {});
+    assert.equal(res.status, 400, url);
+    const documented = paths[pathName].get.responses["400"];
+    assert.ok(documented, url);
+    assert.deepEqual(res.json, documented.content["application/json"].example, url);
+  }
+  // A role of an organ is not a list of the public people.
+  assert.equal((await request("GET", "/api/public/people?role=ORGAN_MEMBER")).status, 400);
+});
+
+test("the documented organ and people request examples are accepted by the real router", async () => {
+  await resetDb();
+  const { token } = await loginAsAdmin(request);
+  const paths: any = openApiSpec.paths;
+  const examplesOf = (op: any): Record<string, { value: any }> => op.requestBody.content["application/json"].examples;
+
+  const organExamples = examplesOf(paths["/api/admin/organs"].post);
+  assert.ok(Object.keys(organExamples).length >= 2);
+  let organId = "";
+  for (const [name, example] of Object.entries(organExamples)) {
+    const res = await request("POST", "/api/admin/organs", { token, body: example.value });
+    assert.equal(res.status, 201, `${name}: ${JSON.stringify(res.json)}`);
+    organId ||= res.json.id;
+  }
+  const organPatches = examplesOf(paths["/api/admin/organs/{id}"].patch);
+  assert.ok(Object.keys(organPatches).length >= 2);
+  for (const [name, example] of Object.entries(organPatches)) {
+    const res = await request("PATCH", `/api/admin/organs/${organId}`, { token, body: example.value });
+    assert.equal(res.status, 200, `${name}: ${JSON.stringify(res.json)}`);
+  }
+
+  // The examples name an organ by the documented sample id: swap in the real one.
+  const withRealOrgan = (value: any) => JSON.parse(JSON.stringify(value).replaceAll(DOC_ORGAN_ID, organId));
+  const personExamples = examplesOf(paths["/api/admin/people"].post);
+  assert.ok(Object.keys(personExamples).length >= 3);
+  assert.ok(JSON.stringify(personExamples).includes(DOC_ORGAN_ID), "an example places a person in an organ");
+  let personId = "";
+  for (const [name, example] of Object.entries(personExamples)) {
+    const res = await request("POST", "/api/admin/people", { token, body: withRealOrgan(example.value) });
+    assert.equal(res.status, 201, `${name}: ${JSON.stringify(res.json)}`);
+    personId ||= res.json.id;
+  }
+  const personPatches = examplesOf(paths["/api/admin/people/{id}"].patch);
+  assert.ok(Object.keys(personPatches).length >= 3);
+  for (const [name, example] of Object.entries(personPatches)) {
+    const res = await request("PATCH", `/api/admin/people/${personId}`, { token, body: withRealOrgan(example.value) });
+    assert.equal(res.status, 200, `${name}: ${JSON.stringify(res.json)}`);
+  }
+});
+
+test("real organ and people answers, null parts included, match the documented response schemas", async () => {
+  await resetDb();
+  const { token } = await loginAsAdmin(request);
+  const ajv = new Ajv({ strict: false, allErrors: true, validateFormats: false });
+  ajv.addSchema(structuredClone(openApiSpec), "openapi");
+  const conforms = (label: string, validate: ReturnType<typeof validatorFor>, value: unknown) => {
+    assert.ok(validate(value), `${label} does not match the document: ${ajv.errorsText(validate.errors)}\n${JSON.stringify(value)}`);
+  };
+  const send = (method: string, path: string, body?: unknown) => request(method, path, { token, body });
+
+  const image = await prisma.media.create({
+    data: { bucket: "mateira-media", objectKey: newObjectKey("image/png"), mimeType: "image/png", alt: "Il ritratto" },
+  });
+  const organ = await send("POST", "/api/admin/organs", { name: "Consiglio", category: "GOVERNANCE", description: "Funzioni.", status: "PUBLISHED" });
+  const bare = await send("POST", "/api/admin/organs", { name: "Comitato", category: "ADVISORY", status: "PUBLISHED" });
+  assert.equal(bare.json.description, null, "the case under test is really there");
+  const organCreated = validatorFor(ajv, "/api/admin/organs", "post", "201");
+  conforms("POST /api/admin/organs", organCreated, organ.json);
+  conforms("POST /api/admin/organs without description", organCreated, bare.json);
+
+  const full = await send("POST", "/api/admin/people", {
+    name: "Anna Rossi",
+    bio: "Biografia.",
+    photoId: image.id,
+    status: "PUBLISHED",
+    roles: [
+      { kind: "PROMOTER", title: "Promotrice" },
+      { kind: "ORGAN_MEMBER", organId: organ.json.id, title: "Presidente" },
+    ],
+  });
+  const minimal = await send("POST", "/api/admin/people", { name: "Luca Bianchi", status: "PUBLISHED", roles: [{ kind: "TEAM" }] });
+  assert.equal(minimal.json.photo, null, "the case under test is really there");
+  assert.equal(minimal.json.roles[0].title, null);
+  assert.equal(minimal.json.roles[0].organId, null);
+  const personCreated = validatorFor(ajv, "/api/admin/people", "post", "201");
+  conforms("POST /api/admin/people", personCreated, full.json);
+  conforms("POST /api/admin/people minimal", personCreated, minimal.json);
+
+  conforms("GET /api/admin/organs", validatorFor(ajv, "/api/admin/organs", "get", "200"), (await send("GET", "/api/admin/organs")).json);
+  const detail = (await send("GET", `/api/admin/organs/${organ.json.id}`)).json;
+  assert.equal(detail.members.length, 1);
+  conforms("GET /api/admin/organs/{id}", validatorFor(ajv, "/api/admin/organs/{id}", "get", "200"), detail);
+  conforms(
+    "PATCH /api/admin/organs/{id}",
+    validatorFor(ajv, "/api/admin/organs/{id}", "patch", "200"),
+    (await send("PATCH", `/api/admin/organs/${organ.json.id}`, { position: 3 })).json,
+  );
+  conforms("GET /api/admin/people", validatorFor(ajv, "/api/admin/people", "get", "200"), (await send("GET", "/api/admin/people")).json);
+  conforms(
+    "GET /api/admin/people/{id}",
+    validatorFor(ajv, "/api/admin/people/{id}", "get", "200"),
+    (await send("GET", `/api/admin/people/${full.json.id}`)).json,
+  );
+  conforms(
+    "PATCH /api/admin/people/{id}",
+    validatorFor(ajv, "/api/admin/people/{id}", "patch", "200"),
+    (await send("PATCH", `/api/admin/people/${full.json.id}`, { bio: null })).json,
+  );
+
+  const publicOrgans = (await send("GET", "/api/public/organs")).json;
+  assert.equal(publicOrgans.organs.length, 2);
+  conforms("GET /api/public/organs", validatorFor(ajv, "/api/public/organs", "get", "200"), publicOrgans);
+  const publicPeople = (await send("GET", "/api/public/people?role=TEAM")).json;
+  assert.equal(publicPeople.people.length, 1);
+  conforms("GET /api/public/people", validatorFor(ajv, "/api/public/people", "get", "200"), publicPeople);
+
+  // The check can fail: a category outside the list, a missing memberCount, a role without its kind.
+  assert.equal(organCreated({ ...organ.json, category: "OTHER" }), false);
+  const { memberCount, ...withoutCount } = organ.json;
+  assert.ok(memberCount !== undefined);
+  assert.equal(organCreated(withoutCount), false);
+  const { kind, ...roleWithoutKind } = full.json.roles[0];
+  assert.ok(kind);
+  assert.equal(personCreated({ ...full.json, roles: [roleWithoutKind] }), false);
 });
