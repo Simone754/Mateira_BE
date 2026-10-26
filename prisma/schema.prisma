@@ -59,6 +59,7 @@ model Media {
   createdAt      DateTime @default(now())
   coverOf        News[]   @relation("NewsImage")
   attachmentOf   News[]   @relation("NewsAttachments")
+  photoOf        Person[] @relation("PersonPhoto")
 }
 
 model News {
@@ -116,4 +117,58 @@ model Word {
 
   @@unique([page, term])
   @@index([page, status, position])
+}
+
+enum OrganCategory {
+  GOVERNANCE
+  ADVISORY
+}
+
+enum PersonRoleKind {
+  PROMOTER
+  TEAM
+  AMBASSADOR
+  ORGAN_MEMBER
+}
+
+model Organ {
+  id          String        @id @default(uuid())
+  name        String        @unique
+  category    OrganCategory
+  description String?       @db.Text
+  position    Int
+  status      ContentStatus @default(DRAFT)
+  publishedAt DateTime?
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+  roles       PersonRole[]
+
+  @@index([category, status, position])
+}
+
+model Person {
+  id          String        @id @default(uuid())
+  name        String
+  bio         String?       @db.Text
+  photoId     String?
+  photo       Media?        @relation("PersonPhoto", fields: [photoId], references: [id], onDelete: SetNull)
+  status      ContentStatus @default(DRAFT)
+  publishedAt DateTime?
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+  roles       PersonRole[]
+}
+
+model PersonRole {
+  id        String         @id @default(uuid())
+  personId  String
+  person    Person         @relation(fields: [personId], references: [id], onDelete: Cascade)
+  kind      PersonRoleKind
+  organId   String?
+  organ     Organ?         @relation(fields: [organId], references: [id], onDelete: Cascade)
+  title     String?
+  position  Int
+  createdAt DateTime       @default(now())
+
+  @@index([kind, organId, position])
 }

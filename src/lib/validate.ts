@@ -49,6 +49,37 @@ export function optString(o: Obj, key: string, max = 200): string | null | undef
   return trimmed;
 }
 
+/** The field with its line ends turned into "\n", so a text typed on Windows is stored and measured like any other. */
+export function withUnixLineEnds(o: Obj, key: string): Obj {
+  if (!Object.hasOwn(o, key)) return {};
+  const value = o[key];
+  return { [key]: typeof value === "string" ? value.replace(/\r\n?/g, "\n") : value };
+}
+
+/** reqString after the line ends became "\n" (so the length is measured on what is stored). */
+export function reqText(o: Obj, key: string, max: number): string {
+  return reqString(withUnixLineEnds(o, key), key, max);
+}
+
+/** optString after the line ends became "\n". */
+export function optText(o: Obj, key: string, max: number): string | null | undefined {
+  return optString(withUnixLineEnds(o, key), key, max);
+}
+
+/** reqString for a text that must stay on one line. */
+export function reqLine(o: Obj, key: string, max: number): string {
+  const value = reqString(o, key, max);
+  if (/[\r\n]/.test(value)) throw httpError(400, `${key} must be a single line`);
+  return value;
+}
+
+/** optString for a text that must stay on one line. */
+export function optLine(o: Obj, key: string, max: number): string | null | undefined {
+  const value = optString(o, key, max);
+  if (typeof value === "string" && /[\r\n]/.test(value)) throw httpError(400, `${key} must be a single line`);
+  return value;
+}
+
 export function reqEnum<T extends string>(o: Obj, key: string, values: readonly T[]): T {
   const value = o[key];
   if (typeof value !== "string" || !(values as readonly string[]).includes(value)) {

@@ -3,7 +3,7 @@ import { URL } from "node:url";
 import type { Prisma, Word } from "@prisma/client";
 
 import { httpError } from "../../lib/httpErrors";
-import { assertOnlyKeys, optEnum, optString, reqEnum, reqString } from "../../lib/validate";
+import { assertOnlyKeys, optEnum, optText, reqEnum, reqLine, reqText } from "../../lib/validate";
 import { prisma } from "../../plugins/prisma";
 import {
   CONTENT_STATUSES,
@@ -55,25 +55,8 @@ export type WordPatchInput = {
   status?: ContentStatusValue;
 };
 
-/** The field with its line ends turned into "\n", so a text typed on Windows is stored and measured like any other. */
-function withUnixLineEnds(o: Obj, key: string): Obj {
-  if (!Object.hasOwn(o, key)) return {};
-  const value = o[key];
-  return { [key]: typeof value === "string" ? value.replace(/\r\n?/g, "\n") : value };
-}
-
-function reqText(o: Obj, key: string, max: number): string {
-  return reqString(withUnixLineEnds(o, key), key, max);
-}
-
-function optText(o: Obj, key: string, max: number): string | null | undefined {
-  return optString(withUnixLineEnds(o, key), key, max);
-}
-
 function parseTerm(o: Obj): string {
-  const term = reqString(o, "term", TERM_MAX);
-  if (/[\r\n]/.test(term)) throw httpError(400, "term must be a single line");
-  return term;
+  return reqLine(o, "term", TERM_MAX);
 }
 
 function optPosition(o: Obj): number | undefined {

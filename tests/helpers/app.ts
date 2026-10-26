@@ -61,7 +61,7 @@ export async function resetDb(): Promise<void> {
     throw new Error("resetDb refuses to run: DATABASE_URL is not a test database");
   }
   await prisma.$executeRawUnsafe(
-    'TRUNCATE TABLE "RefreshToken", "News", "Media", "HomeBlock", "Word", "User" RESTART IDENTITY CASCADE',
+    'TRUNCATE TABLE "RefreshToken", "News", "Media", "HomeBlock", "Word", "PersonRole", "Person", "Organ", "User" RESTART IDENTITY CASCADE',
   );
 }
 
