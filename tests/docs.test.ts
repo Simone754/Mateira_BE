@@ -28,14 +28,11 @@ import {
 import { newObjectKey } from "../src/modules/media/service";
 import { ORGAN_CATEGORIES } from "../src/modules/organs/dto";
 import {
-  BIO_MAX,
   ORGAN_DESCRIPTION_MAX,
   ORGAN_NAME_MAX,
-  PERSON_NAME_MAX,
   POSITION_MAX as PEOPLE_POSITION_MAX,
-  ROLES_MAX,
-  ROLE_TITLE_MAX,
 } from "../src/modules/organs/service";
+import { BIO_MAX, PERSON_NAME_MAX, ROLES_MAX, ROLE_TITLE_MAX } from "../src/modules/people/service";
 import { PERSON_ROLE_KINDS, PUBLIC_PERSON_ROLE_KINDS } from "../src/modules/people/dto";
 import { WORD_PAGES } from "../src/modules/words/dto";
 import { CLOSING_MAX, ETYMOLOGY_MAX, MEANING_MAX, POSITION_MAX, TERM_MAX } from "../src/modules/words/service";

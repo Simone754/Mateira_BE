@@ -7,22 +7,20 @@ import { assertOnlyKeys, isUuid, optEnum, optLine, optText, optUuid, reqEnum, re
 import { prisma } from "../../plugins/prisma";
 import { findAllowedType, serializeMedia } from "../media/service";
 import { CONTENT_STATUSES, type ContentStatusValue, type MemberPublic } from "../organs/dto";
-import {
-  BIO_MAX,
-  DUPLICATE_ROLE,
-  optPosition,
-  ORGAN_NOT_ALLOWED,
-  ORGAN_REQUIRED,
-  PERSON_NAME_MAX,
-  POSITION_MAX,
-  ROLE_TITLE_MAX,
-  ROLES_MAX,
-  serializeMember,
-} from "../organs/service";
+import { optPosition, POSITION_MAX, serializeMember } from "../organs/service";
 import { PERSON_ROLE_KINDS, PUBLIC_PERSON_ROLE_KINDS, type PersonAdmin, type PersonRoleKindValue } from "./dto";
 
 type Obj = Record<string, unknown>;
 type Tx = Prisma.TransactionClient;
+
+export const PERSON_NAME_MAX = 120;
+export const BIO_MAX = 3000;
+export const ROLE_TITLE_MAX = 120;
+export const ROLES_MAX = 20;
+
+export const DUPLICATE_ROLE = "duplicate role";
+export const ORGAN_REQUIRED = "organId is required for ORGAN_MEMBER";
+export const ORGAN_NOT_ALLOWED = "organId is only allowed for ORGAN_MEMBER";
 
 const PERSON_KEYS = ["name", "bio", "photoId", "status", "roles"] as const;
 const ROLE_KEYS = ["kind", "organId", "title", "position"] as const;
@@ -51,11 +49,15 @@ export type PersonPatchInput = {
   roles?: RoleInput[];
 };
 
-export const PERSON_ORDER: Prisma.PersonOrderByWithRelationInput[] = [
-  { name: "asc" },
-  { createdAt: "asc" },
-  { id: "asc" },
-];
+/** Database order of the admin list; listAdminPeople then sorts by name without telling upper and lower case apart. */
+const PERSON_ORDER: Prisma.PersonOrderByWithRelationInput[] = [{ createdAt: "asc" }, { id: "asc" }];
+
+/** The people that match, by name (case-insensitive, Italian collation), then creation date, then id. */
+export async function listAdminPeople(where: Prisma.PersonWhereInput): Promise<PersonWithRoles[]> {
+  const rows = await prisma.person.findMany({ where, orderBy: PERSON_ORDER, include: WITH_ROLES });
+  // sort is stable: people with the same name keep the createdAt, id order of the query.
+  return rows.sort((a, b) => a.name.localeCompare(b.name, "it", { sensitivity: "base" }));
+}
 
 export const WITH_ROLES = {
   photo: true,
@@ -76,7 +78,8 @@ function parseRole(raw: unknown, index: number): RoleInput {
   try {
     assertOnlyKeys(o, ROLE_KEYS);
     const kind = reqEnum(o, "kind", PERSON_ROLE_KINDS);
-    const sent = o.organId !== undefined && o.organId !== null;
+    // An empty optional field counts as absent.
+    const sent = o.organId !== undefined && o.organId !== null && o.organId !== "";
     let organId: string | null = null;
     if (kind === "ORGAN_MEMBER") {
       if (!sent) throw httpError(400, ORGAN_REQUIRED);
@@ -109,12 +112,17 @@ export function parseRoles(o: Obj): RoleInput[] | undefined {
   return roles;
 }
 
+/** The photo: an empty string counts as null (an empty optional field is absent). */
+function optPhotoId(o: Obj): string | null | undefined {
+  return o.photoId === "" ? null : optUuid(o, "photoId");
+}
+
 export function parsePersonCreate(o: Obj): PersonCreateInput {
   assertOnlyKeys(o, PERSON_KEYS);
   return {
     name: reqLine(o, "name", PERSON_NAME_MAX),
     bio: optText(o, "bio", BIO_MAX) ?? null,
-    photoId: optUuid(o, "photoId") ?? null,
+    photoId: optPhotoId(o) ?? null,
     status: optEnum(o, "status", CONTENT_STATUSES) ?? "DRAFT",
     roles: parseRoles(o) ?? [],
   };
@@ -128,7 +136,7 @@ export function parsePersonPatch(o: Obj): PersonPatchInput {
   if (Object.hasOwn(o, "name")) patch.name = reqLine(o, "name", PERSON_NAME_MAX);
   const bio = optText(o, "bio", BIO_MAX);
   if (bio !== undefined) patch.bio = bio;
-  const photoId = optUuid(o, "photoId");
+  const photoId = optPhotoId(o);
   if (photoId !== undefined) patch.photoId = photoId;
   const status = optEnum(o, "status", CONTENT_STATUSES);
   if (status !== undefined) patch.status = status;

@@ -21,16 +21,9 @@ type Obj = Record<string, unknown>;
 
 export const ORGAN_NAME_MAX = 160;
 export const ORGAN_DESCRIPTION_MAX = 3000;
-export const PERSON_NAME_MAX = 120;
-export const BIO_MAX = 3000;
-export const ROLE_TITLE_MAX = 120;
-export const ROLES_MAX = 20;
 export const POSITION_MAX = 9999;
 
 export const DUPLICATE_ORGAN = "an organ with this name already exists";
-export const DUPLICATE_ROLE = "duplicate role";
-export const ORGAN_REQUIRED = "organId is required for ORGAN_MEMBER";
-export const ORGAN_NOT_ALLOWED = "organId is only allowed for ORGAN_MEMBER";
 
 const ORGAN_KEYS = ["name", "category", "description", "position", "status"] as const;
 
@@ -186,6 +179,11 @@ export async function findOrganDetail(id: string): Promise<OrganAdminDetail | nu
   if (!organ) return null;
   return {
     ...serializeAdmin(organ),
-    members: organ.roles.map((row) => ({ ...serializeMember(row), roleId: row.id, status: row.person.status })),
+    members: organ.roles.map((row) => ({
+      ...serializeMember(row),
+      roleId: row.id,
+      status: row.person.status,
+      position: row.position,
+    })),
   };
 }

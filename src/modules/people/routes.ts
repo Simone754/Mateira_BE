@@ -9,13 +9,13 @@ import { isPrismaError } from "../../lib/prismaErrors";
 import { asObject, isUuid } from "../../lib/validate";
 import { type AdminSession, hasSession } from "../../middlewares/adminGuard";
 import { prisma } from "../../plugins/prisma";
-import { DUPLICATE_ROLE } from "../organs/service";
 import {
   checkReferences,
+  DUPLICATE_ROLE,
+  listAdminPeople,
   listPublicPeople,
   parsePersonCreate,
   parsePersonPatch,
-  PERSON_ORDER,
   personFilters,
   publicRoleFilter,
   replaceRoles,
@@ -40,7 +40,7 @@ export async function handlePeople(
   if (!hasSession(res, session)) return true;
 
   if (parts.length === 3 && req.method === "GET") {
-    const rows = await prisma.person.findMany({ where: personFilters(url), orderBy: PERSON_ORDER, include: WITH_ROLES });
+    const rows = await listAdminPeople(personFilters(url));
     json(res, 200, { people: rows.map(serializePerson) });
     return true;
   }
@@ -106,8 +106,9 @@ export async function handlePeople(
 
       try {
         const updated = await prisma.$transaction(async (tx) => {
-          // Also when only the roles change: it fails with P2025 if a concurrent delete won, and bumps updatedAt.
-          await tx.person.update({ where: { id }, data });
+          // Always a real UPDATE (also when only the roles change): it locks the person row, so concurrent PATCHes
+          // serialise, fails with P2025 if a concurrent delete won, and bumps updatedAt.
+          await tx.person.update({ where: { id }, data: { ...data, updatedAt: new Date() } });
           if (patch.roles) await replaceRoles(tx, id, patch.roles);
           return tx.person.findUniqueOrThrow({ where: { id }, include: WITH_ROLES });
         });
@@ -124,7 +125,13 @@ export async function handlePeople(
 
 /** Errors of a concurrent request: the person vanished (404), the same role written twice (409), an organ or photo vanished (400). */
 async function mapWriteError(err: unknown, res: ServerResponse, personId?: string): Promise<void> {
-  if (isPrismaError(err, "P2025")) return notFound(res);
+  if (isPrismaError(err, "P2025")) {
+    // A record to write is gone: the person (404) or, when it still exists, an organ deleted with its roles (400).
+    if (personId && (await prisma.person.count({ where: { id: personId } })) > 0) {
+      throw httpError(400, "organId or photoId no longer exists");
+    }
+    return notFound(res);
+  }
   if (isPrismaError(err, "P2002") || isPrismaError(err, "P2034")) throw httpError(409, DUPLICATE_ROLE);
   if (isPrismaError(err, "P2003")) {
     // A foreign key failed after the checks: the person (when it is an update), an organ or the photo was deleted.

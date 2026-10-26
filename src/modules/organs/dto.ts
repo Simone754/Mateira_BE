@@ -34,7 +34,7 @@ export type OrganAdmin = Omit<OrganPublic, "members"> & {
   memberCount: number;
 };
 
-/** An admin sees every member of the organ, drafts included: `roleId` is the id of the role, `status` that of the person. */
-export type OrganMemberAdmin = MemberPublic & { roleId: string; status: ContentStatusValue };
+/** An admin sees every member of the organ, drafts included: `roleId` is the id of the role, `status` that of the person, `position` that of the role. */
+export type OrganMemberAdmin = MemberPublic & { roleId: string; status: ContentStatusValue; position: number };
 
 export type OrganAdminDetail = OrganAdmin & { members: OrganMemberAdmin[] };

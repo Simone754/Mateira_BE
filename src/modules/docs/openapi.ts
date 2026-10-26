@@ -102,7 +102,7 @@ const organAdminExample = {
 };
 const organAdminDetailExample = {
   ...organAdminExample,
-  members: [{ ...memberPublicExample, roleId: ROLE_ID, status: "PUBLISHED" }],
+  members: [{ ...memberPublicExample, roleId: ROLE_ID, status: "PUBLISHED", position: 0 }],
 };
 const personAdminExample = {
   id: PERSON_ID,
@@ -1221,7 +1221,7 @@ export const openApiSpec = {
         summary: "Dettaglio di un organo con i membri",
         description:
           "Tutti i campi, anche per le bozze, più `members`: tutti i membri, anche le persone in bozza, in ordine. " +
-          "Ogni membro ha `roleId` (l'id dell'incarico), `status` (quello della persona) e `title` (la carica nell'organo).",
+          "Ogni membro ha `roleId` (l'id dell'incarico), `position` (quella dell'incarico), `status` (quello della persona) e `title` (la carica nell'organo).",
         security: bearer,
         parameters: [{ $ref: "#/components/parameters/Id" }],
         responses: {
@@ -1291,7 +1291,7 @@ export const openApiSpec = {
         operationId: "listPeople",
         summary: "Elenco delle persone",
         description:
-          "Tutte le persone, bozze comprese, con foto risolta e incarichi. Filtri facoltativi: `role` (anche `ORGAN_MEMBER`: chi ha almeno un incarico di quel tipo) e `status`. " +
+          "Tutte le persone, bozze comprese, con foto risolta e incarichi, ordinate per nome (senza distinguere maiuscole), poi data di creazione. Filtri facoltativi: `role` (anche `ORGAN_MEMBER`: chi ha almeno un incarico di quel tipo) e `status`. " +
           "Un valore fuori elenco, anche vuoto, risponde 400; un filtro ripetuto vale l'ultimo.",
         security: bearer,
         parameters: [{ $ref: "#/components/parameters/AdminRoleFilter" }, { $ref: "#/components/parameters/PersonStatusFilter" }],
@@ -2154,10 +2154,11 @@ export const openApiSpec = {
           ref("MemberPublic"),
           {
             type: "object",
-            required: ["roleId", "status"],
+            required: ["roleId", "status", "position"],
             properties: {
               roleId: { type: "string", format: "uuid", description: "L'id dell'incarico della persona in questo organo.", example: ROLE_ID },
               status: { allOf: [ref("ContentStatus")], description: "Lo stato della persona." },
+              position: { type: "integer", minimum: 0, maximum: 9999, description: "La posizione dell'incarico nell'elenco dei membri dell'organo.", example: 0 },
             },
           },
         ],

@@ -455,7 +455,8 @@ test("admin organ: lists every member, drafts included, and memberCount counts t
   const detail = (await request("GET", `${ORGANS}/${organ.id}`, { token })).json;
   assert.equal(detail.memberCount, 2);
   assert.deepEqual(detail.members.map((m: any) => [m.name, m.status, m.title]), [["Viva", "PUBLISHED", null], ["Bozza", "DRAFT", "Socia"]]);
-  assert.deepEqual(Object.keys(detail.members[0]).sort(), ["bio", "id", "name", "photo", "roleId", "status", "title"]);
+  assert.deepEqual(Object.keys(detail.members[0]).sort(), ["bio", "id", "name", "photo", "position", "roleId", "status", "title"]);
+  assert.deepEqual(detail.members.map((m: any) => m.position), [0, 1]);
   assert.equal(detail.members[0].id, live.id);
   assert.equal(detail.members[1].id, draft.id);
   assert.equal(detail.members[1].roleId, draft.roles[0].id);
@@ -463,4 +464,59 @@ test("admin organ: lists every member, drafts included, and memberCount counts t
   const list = (await request("GET", ORGANS, { token })).json.organs as any[];
   assert.equal(list[0].memberCount, 2);
   assert.equal("members" in list[0], false);
+});
+
+test("a roles-only PATCH writes the person row: updatedAt changes", async () => {
+  const person = await createPerson();
+  await new Promise((r) => setTimeout(r, 15));
+  const res = await patch(person.id, { roles: [{ kind: "TEAM" }] });
+  assert.equal(res.status, 200, JSON.stringify(res.json));
+  assert.notEqual(res.json.updatedAt, person.updatedAt);
+});
+
+test("two concurrent roles-only PATCH on a person with a role are 200 or 409, never 404 or 500", async () => {
+  const person = await createPerson();
+  for (let i = 0; i < 20; i++) {
+    await prisma.personRole.deleteMany({ where: { personId: person.id } });
+    await prisma.personRole.create({ data: { personId: person.id, kind: "TEAM", title: "x", position: 0 } });
+    const results = await Promise.all([
+      patch(person.id, { roles: [] }),
+      patch(person.id, { roles: [{ kind: "TEAM", title: "y" }] }),
+    ]);
+    for (const res of results) assert.ok([200, 409].includes(res.status), `${i}: ${res.status} ${JSON.stringify(res.json)}`);
+  }
+});
+
+test("an empty organId counts as absent and an empty photoId as null", async () => {
+  const promoter = await post({ name: "Anna", roles: [{ kind: "PROMOTER", organId: "" }] });
+  assert.equal(promoter.status, 201, JSON.stringify(promoter.json));
+  assert.equal(promoter.json.roles[0].organId, null);
+
+  const member = await post({ name: "Bruno", roles: [{ kind: "ORGAN_MEMBER", organId: "" }] });
+  assert.equal(member.status, 400);
+  assert.match(member.json.error ?? member.json.message ?? JSON.stringify(member.json), /organId is required for ORGAN_MEMBER/);
+
+  const media = await createMedia();
+  const person = await createPerson({ name: "Carla", photoId: media.id });
+  const cleared = await patch(person.id, { photoId: "" });
+  assert.equal(cleared.status, 200, JSON.stringify(cleared.json));
+  assert.equal(cleared.json.photo, null);
+  const created = await post({ name: "Dario", photoId: "" });
+  assert.equal(created.status, 201, JSON.stringify(created.json));
+  assert.equal(created.json.photo, null);
+});
+
+test("the database refuses a role with an organ unless it is ORGAN_MEMBER", async () => {
+  const organ = await createOrgan();
+  const person = await createPerson();
+  await assert.rejects(prisma.personRole.create({ data: { personId: person.id, kind: "PROMOTER", organId: organ.id, position: 0 } }));
+  await assert.rejects(prisma.personRole.create({ data: { personId: person.id, kind: "ORGAN_MEMBER", organId: null, position: 0 } }));
+  await prisma.personRole.create({ data: { personId: person.id, kind: "ORGAN_MEMBER", organId: organ.id, position: 0 } });
+});
+
+test("the admin list orders by name without telling upper and lower case apart", async () => {
+  await createPerson({ name: "Zeno" });
+  await createPerson({ name: "anna" });
+  await createPerson({ name: "Bruno" });
+  assert.deepEqual(names(await listPeople()), ["anna", "Bruno", "Zeno"]);
 });
