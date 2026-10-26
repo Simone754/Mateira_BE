@@ -12,10 +12,12 @@ import { prisma } from "../../plugins/prisma";
 import { DUPLICATE_ROLE } from "../organs/service";
 import {
   checkReferences,
+  listPublicPeople,
   parsePersonCreate,
   parsePersonPatch,
   PERSON_ORDER,
   personFilters,
+  publicRoleFilter,
   replaceRoles,
   serializePerson,
   WITH_ROLES,
@@ -28,7 +30,13 @@ export async function handlePeople(
   parts: string[],
   session: AdminSession | null,
 ): Promise<boolean> {
-  if (parts[0] !== "api" || parts[1] !== "admin" || parts[2] !== "people") return false;
+  if (parts[0] !== "api" || parts[2] !== "people") return false;
+  if (parts[1] === "public") {
+    if (req.method !== "GET" || parts.length !== 3) return false;
+    json(res, 200, { people: await listPublicPeople(publicRoleFilter(url)) });
+    return true;
+  }
+  if (parts[1] !== "admin") return false;
   if (!hasSession(res, session)) return true;
 
   if (parts.length === 3 && req.method === "GET") {

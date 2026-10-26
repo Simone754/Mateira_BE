@@ -1,4 +1,4 @@
-import { after, before, beforeEach, test } from "node:test";
+import { after, before, beforeEach, mock, test } from "node:test";
 import assert from "node:assert/strict";
 
 import { prisma } from "../src/plugins/prisma";
@@ -229,7 +229,13 @@ test("the photo is resolved, and a deleted media leaves the person with photo nu
   assert.match(person.photo.url, /^https?:\/\//);
   assert.deepEqual(Object.keys(person.photo).sort(), ["alt", "id", "url"]);
 
-  await prisma.media.delete({ where: { id: media.id } });
+  // No storage server runs in tests: the best-effort object delete fails and logs a warning.
+  const warn = mock.method(console, "warn", () => {});
+  try {
+    assert.equal((await request("DELETE", `/api/admin/media/${media.id}`, { token })).status, 204);
+  } finally {
+    warn.mock.restore();
+  }
   assert.equal((await getOne(person.id)).json.photo, null);
   assert.equal((await listPeople())[0].photo, null);
 
@@ -308,4 +314,153 @@ test("two PATCH with the same new role never give a 500", async () => {
     for (const res of results) assert.ok([200, 409].includes(res.status), `${res.status} ${JSON.stringify(res.json)}`);
     assert.equal((await getOne(person.id)).json.roles.length, 1);
   }
+});
+
+test("exactly 20 distinct roles are accepted", async () => {
+  const organs = [];
+  for (let i = 0; i < 17; i++) organs.push(await createOrgan(`Organo ${i}`));
+  const roles = [
+    ...organs.map((o) => ({ kind: "ORGAN_MEMBER", organId: o.id })),
+    { kind: "PROMOTER" },
+    { kind: "TEAM" },
+    { kind: "AMBASSADOR" },
+  ];
+  assert.equal(roles.length, 20);
+  const res = await post({ name: "Anna Rossi", roles });
+  assert.equal(res.status, 201, JSON.stringify(res.json));
+  assert.equal(res.json.roles.length, 20);
+});
+
+const PUBLIC_PEOPLE = "/api/public/people";
+const publicPeople = async (query: string): Promise<any[]> => {
+  const res = await request("GET", `${PUBLIC_PEOPLE}${query}`);
+  assert.equal(res.status, 200, JSON.stringify(res.json));
+  return res.json.people;
+};
+
+test("public people: published only, in the order of the role, exactly the public fields", async () => {
+  const media = await createMedia("image/png", "Ritratto");
+  await createPerson({ name: "Seconda", status: "PUBLISHED", roles: [{ kind: "PROMOTER", title: "Socia", position: 1 }] });
+  await createPerson({ name: "Bozza", status: "DRAFT", roles: [{ kind: "PROMOTER", position: 0 }] });
+  await createPerson({
+    name: "Prima",
+    bio: "Biografia.",
+    photoId: media.id,
+    status: "PUBLISHED",
+    roles: [{ kind: "PROMOTER", title: "Presidente onoraria", position: 0 }, { kind: "TEAM", title: "Coordinatrice" }],
+  });
+  await createPerson({ name: "Solo team", status: "PUBLISHED", roles: [{ kind: "TEAM" }] });
+
+  const promoters = await publicPeople("?role=PROMOTER");
+  assert.deepEqual(names(promoters), ["Prima", "Seconda"]);
+  for (const p of promoters) assert.deepEqual(Object.keys(p).sort(), ["bio", "id", "name", "photo", "title"]);
+  assert.equal(promoters[0].title, "Presidente onoraria");
+  assert.equal(promoters[0].bio, "Biografia.");
+  assert.deepEqual(Object.keys(promoters[0].photo).sort(), ["alt", "id", "url"]);
+  assert.equal(promoters[0].photo.alt, "Ritratto");
+  assert.equal(promoters[1].photo, null);
+  assert.equal(promoters[1].title, "Socia");
+
+  assert.deepEqual(names(await publicPeople("?role=TEAM")).sort(), ["Prima", "Solo team"]);
+  assert.deepEqual(await publicPeople("?role=AMBASSADOR"), []);
+  // a repeated filter counts the last one
+  assert.deepEqual(names(await publicPeople("?role=PROMOTER&role=AMBASSADOR&role=TEAM")).sort(), ["Prima", "Solo team"]);
+  assert.deepEqual(names(await publicPeople("?role=TEAM&role=PROMOTER")), ["Prima", "Seconda"]);
+});
+
+test("public people: role is required and must be PROMOTER, TEAM or AMBASSADOR", async () => {
+  for (const q of ["", "?role=", "?role=ORGAN_MEMBER", "?role=XYZ", "?role=PROMOTER&role=XYZ", "?other=PROMOTER"]) {
+    assert.equal((await request("GET", `${PUBLIC_PEOPLE}${q}`)).status, 400, q);
+  }
+});
+
+test("public people: a deleted photo leaves photo null, and the route is read-only", async () => {
+  const media = await createMedia();
+  await createPerson({ status: "PUBLISHED", photoId: media.id, roles: [{ kind: "TEAM" }] });
+  await prisma.media.delete({ where: { id: media.id } });
+  assert.equal((await publicPeople("?role=TEAM"))[0].photo, null);
+  assert.equal((await request("POST", `${PUBLIC_PEOPLE}?role=TEAM`, { body: {} })).status, 404);
+});
+
+test("publication rule: people and organs appear in public only when formalized", async () => {
+  const pubOrgans = async () => (await request("GET", "/api/public/organs")).json.organs as any[];
+  const mkOrgan = async (name: string, status: string) => {
+    const res = await request("POST", ORGANS, { token, body: { name, category: "GOVERNANCE", status } });
+    assert.equal(res.status, 201);
+    return res.json;
+  };
+  const draftOrgan = await mkOrgan("Organo in bozza", "DRAFT");
+  const liveOrgan = await mkOrgan("Organo pubblicato", "PUBLISHED");
+
+  // published person in a draft organ: the organ is not there, the person is still a promoter
+  await createPerson({
+    name: "Pubblicata",
+    status: "PUBLISHED",
+    roles: [{ kind: "ORGAN_MEMBER", organId: draftOrgan.id, title: "Presidente" }, { kind: "PROMOTER" }],
+  });
+  // draft person in a published organ: members stay empty
+  await createPerson({ name: "In bozza", status: "DRAFT", roles: [{ kind: "ORGAN_MEMBER", organId: liveOrgan.id }] });
+
+  let organs = await pubOrgans();
+  assert.deepEqual(names(organs), ["Organo pubblicato"]);
+  assert.deepEqual(organs[0].members, []);
+  assert.deepEqual(names(await publicPeople("?role=PROMOTER")), ["Pubblicata"]);
+  assert.deepEqual(await publicPeople("?role=TEAM"), []);
+
+  // both published: the member is there with the title of this role
+  await createPerson({
+    name: "Consigliera",
+    status: "PUBLISHED",
+    roles: [{ kind: "ORGAN_MEMBER", organId: liveOrgan.id, title: "Consigliera", position: 5 }],
+  });
+  organs = await pubOrgans();
+  assert.equal(organs[0].members.length, 1);
+  assert.deepEqual(Object.keys(organs[0].members[0]).sort(), ["bio", "id", "name", "photo", "title"]);
+  assert.equal(organs[0].members[0].name, "Consigliera");
+  assert.equal(organs[0].members[0].title, "Consigliera");
+});
+
+test("organ members: in the order of the role, a person in two organs has a title in each", async () => {
+  const a = await createOrgan("Organo A");
+  const b = await createOrgan("Organo B");
+  await request("PATCH", `${ORGANS}/${a.id}`, { token, body: { status: "PUBLISHED" } });
+  await request("PATCH", `${ORGANS}/${b.id}`, { token, body: { status: "PUBLISHED" } });
+  const media = await createMedia("image/png", "Foto");
+  const anna = await createPerson({
+    name: "Anna",
+    photoId: media.id,
+    status: "PUBLISHED",
+    roles: [
+      { kind: "ORGAN_MEMBER", organId: a.id, title: "Presidente", position: 1 },
+      { kind: "ORGAN_MEMBER", organId: b.id, title: "Segretaria", position: 0 },
+    ],
+  });
+  await createPerson({ name: "Luca", status: "PUBLISHED", roles: [{ kind: "ORGAN_MEMBER", organId: a.id, title: "Vice", position: 0 }] });
+
+  const organs = (await request("GET", "/api/public/organs")).json.organs as any[];
+  const orgA = organs.find((o) => o.name === "Organo A");
+  const orgB = organs.find((o) => o.name === "Organo B");
+  assert.deepEqual(orgA.members.map((m: any) => [m.name, m.title]), [["Luca", "Vice"], ["Anna", "Presidente"]]);
+  assert.deepEqual(orgB.members.map((m: any) => [m.name, m.title]), [["Anna", "Segretaria"]]);
+  assert.equal(orgA.members[1].id, anna.id);
+  assert.deepEqual(Object.keys(orgA.members[1].photo).sort(), ["alt", "id", "url"]);
+});
+
+test("admin organ: lists every member, drafts included, and memberCount counts them all", async () => {
+  const organ = await createOrgan("Organo A");
+  const draft = await createPerson({ name: "Bozza", roles: [{ kind: "ORGAN_MEMBER", organId: organ.id, title: "Socia", position: 1 }] });
+  const live = await createPerson({ name: "Viva", status: "PUBLISHED", roles: [{ kind: "ORGAN_MEMBER", organId: organ.id, position: 0 }] });
+  await createPerson({ name: "Altrove", roles: [{ kind: "TEAM" }] });
+
+  const detail = (await request("GET", `${ORGANS}/${organ.id}`, { token })).json;
+  assert.equal(detail.memberCount, 2);
+  assert.deepEqual(detail.members.map((m: any) => [m.name, m.status, m.title]), [["Viva", "PUBLISHED", null], ["Bozza", "DRAFT", "Socia"]]);
+  assert.deepEqual(Object.keys(detail.members[0]).sort(), ["bio", "id", "name", "photo", "roleId", "status", "title"]);
+  assert.equal(detail.members[0].id, live.id);
+  assert.equal(detail.members[1].id, draft.id);
+  assert.equal(detail.members[1].roleId, draft.roles[0].id);
+
+  const list = (await request("GET", ORGANS, { token })).json.organs as any[];
+  assert.equal(list[0].memberCount, 2);
+  assert.equal("members" in list[0], false);
 });

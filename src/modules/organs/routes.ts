@@ -12,12 +12,13 @@ import { prisma } from "../../plugins/prisma";
 import {
   categoryFilter,
   DUPLICATE_ORGAN,
+  findOrganDetail,
   listOrgans,
+  listPublicOrgans,
   nextPosition,
   parseOrganCreate,
   parseOrganPatch,
   serializeAdmin,
-  serializePublic,
   WITH_COUNT,
 } from "./service";
 
@@ -39,9 +40,7 @@ async function handlePublic(req: IncomingMessage, res: ServerResponse, url: URL,
   if (req.method !== "GET" || parts.length !== 3) return false;
 
   const category = categoryFilter(url);
-  const rows = await listOrgans({ status: "PUBLISHED", ...(category ? { category } : {}) });
-  // The people of each organ arrive with the public reads of people.
-  json(res, 200, { organs: rows.map((organ) => ({ ...serializePublic(organ), members: [] })) });
+  json(res, 200, { organs: await listPublicOrgans(category) });
   return true;
 }
 
@@ -103,7 +102,9 @@ async function handleAdmin(
     }
 
     if (req.method === "GET") {
-      json(res, 200, serializeAdmin(existing));
+      const detail = await findOrganDetail(id);
+      if (detail) json(res, 200, detail);
+      else notFound(res);
       return true;
     }
 

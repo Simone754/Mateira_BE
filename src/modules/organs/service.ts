@@ -1,15 +1,18 @@
 import { URL } from "node:url";
 
-import type { Organ, Prisma } from "@prisma/client";
+import type { Media, Organ, Person, PersonRole, Prisma } from "@prisma/client";
 
 import { httpError } from "../../lib/httpErrors";
 import { assertOnlyKeys, optEnum, optText, reqEnum, reqLine } from "../../lib/validate";
 import { prisma } from "../../plugins/prisma";
+import { serializeMedia } from "../media/service";
 import {
   CONTENT_STATUSES,
   type ContentStatusValue,
   ORGAN_CATEGORIES,
+  type MemberPublic,
   type OrganAdmin,
+  type OrganAdminDetail,
   type OrganCategoryValue,
   type OrganPublic,
 } from "./dto";
@@ -140,4 +143,49 @@ export async function listOrgans(where: Prisma.OrganWhereInput): Promise<OrganWi
 export async function nextPosition(category: OrganCategoryValue): Promise<number> {
   const last = await prisma.organ.aggregate({ where: { category }, _max: { position: true } });
   return Math.min((last._max.position ?? -1) + 1, POSITION_MAX);
+}
+
+/** The roles of an organ in their order, with the person and the photo (one query for every organ, no N+1). */
+const ROLE_ORDER: Prisma.PersonRoleOrderByWithRelationInput[] = [{ position: "asc" }, { createdAt: "asc" }, { id: "asc" }];
+const MEMBER_INCLUDE = { person: { include: { photo: true } } } as const;
+
+export type MemberRow = PersonRole & { person: Person & { photo: Media | null } };
+
+export function serializeMember(row: MemberRow): MemberPublic {
+  const media = row.person.photo ? serializeMedia(row.person.photo) : null;
+  return {
+    id: row.person.id,
+    name: row.person.name,
+    bio: row.person.bio,
+    photo: media ? { id: media.id, url: media.url, alt: media.alt } : null,
+    title: row.title,
+  };
+}
+
+/**
+ * The published organs with their published members. An organ appears when it is PUBLISHED; a member only when the
+ * person is PUBLISHED too (the filter is in the query, so a draft never reaches the response).
+ */
+export async function listPublicOrgans(category: OrganCategoryValue | undefined) {
+  const rows = await prisma.organ.findMany({
+    where: { status: "PUBLISHED", ...(category ? { category } : {}) },
+    orderBy: ORGAN_ORDER,
+    include: { roles: { where: { person: { status: "PUBLISHED" } }, orderBy: ROLE_ORDER, include: MEMBER_INCLUDE } },
+  });
+  return rows
+    .sort((a, b) => categoryRank(a.category) - categoryRank(b.category))
+    .map((organ) => ({ ...serializePublic(organ), members: organ.roles.map(serializeMember) }));
+}
+
+/** One organ for the admin: every member, drafts included. */
+export async function findOrganDetail(id: string): Promise<OrganAdminDetail | null> {
+  const organ = await prisma.organ.findUnique({
+    where: { id },
+    include: { ...WITH_COUNT, roles: { orderBy: ROLE_ORDER, include: MEMBER_INCLUDE } },
+  });
+  if (!organ) return null;
+  return {
+    ...serializeAdmin(organ),
+    members: organ.roles.map((row) => ({ ...serializeMember(row), roleId: row.id, status: row.person.status })),
+  };
 }

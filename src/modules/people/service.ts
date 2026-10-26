@@ -6,7 +6,7 @@ import { HttpError, httpError } from "../../lib/httpErrors";
 import { assertOnlyKeys, isUuid, optEnum, optLine, optText, optUuid, reqEnum, reqLine } from "../../lib/validate";
 import { prisma } from "../../plugins/prisma";
 import { findAllowedType, serializeMedia } from "../media/service";
-import { CONTENT_STATUSES, type ContentStatusValue } from "../organs/dto";
+import { CONTENT_STATUSES, type ContentStatusValue, type MemberPublic } from "../organs/dto";
 import {
   BIO_MAX,
   DUPLICATE_ROLE,
@@ -17,8 +17,9 @@ import {
   POSITION_MAX,
   ROLE_TITLE_MAX,
   ROLES_MAX,
+  serializeMember,
 } from "../organs/service";
-import { PERSON_ROLE_KINDS, type PersonAdmin, type PersonRoleKindValue } from "./dto";
+import { PERSON_ROLE_KINDS, PUBLIC_PERSON_ROLE_KINDS, type PersonAdmin, type PersonRoleKindValue } from "./dto";
 
 type Obj = Record<string, unknown>;
 type Tx = Prisma.TransactionClient;
@@ -216,4 +217,21 @@ export function serializePerson(person: PersonWithRoles): PersonAdmin {
       position: r.position,
     })),
   };
+}
+
+/** The `role` of the public list: required, one of PROMOTER, TEAM, AMBASSADOR (the last one counts if repeated). */
+export function publicRoleFilter(url: URL): (typeof PUBLIC_PERSON_ROLE_KINDS)[number] {
+  const role = optEnum(Object.fromEntries(url.searchParams), "role", PUBLIC_PERSON_ROLE_KINDS);
+  if (!role) throw httpError(400, `role is required: ${PUBLIC_PERSON_ROLE_KINDS.join(", ")}`);
+  return role;
+}
+
+/** The published people with that role, in the order of the role. One query: the person and the photo come with the role. */
+export async function listPublicPeople(role: (typeof PUBLIC_PERSON_ROLE_KINDS)[number]): Promise<MemberPublic[]> {
+  const rows = await prisma.personRole.findMany({
+    where: { kind: role, person: { status: "PUBLISHED" } },
+    orderBy: [{ position: "asc" }, { createdAt: "asc" }, { id: "asc" }],
+    include: { person: { include: { photo: true } } },
+  });
+  return rows.map(serializeMember);
 }

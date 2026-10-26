@@ -23,3 +23,6 @@ export type PersonAdmin = {
   updatedAt: string;
   roles: PersonRoleAdmin[];
 };
+
+export const PUBLIC_PERSON_ROLE_KINDS = ["PROMOTER", "TEAM", "AMBASSADOR"] as const;
+export type PublicPersonRoleKindValue = (typeof PUBLIC_PERSON_ROLE_KINDS)[number];
