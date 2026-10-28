@@ -1,6 +1,8 @@
 # Mateira API
 
-Backend REST del sito Mateira: autenticazione del superuser, gestione dei media (upload diretto verso lo storage tramite URL firmati), delle news e dei blocchi della Home con flusso bozza/pubblicato. Node.js e TypeScript, server `http` nativo, Prisma 7, PostgreSQL.
+Backend REST del sito della Fondazione MATEIRA: autenticazione del superuser, gestione dei media (upload diretto verso lo storage tramite URL firmati), delle news, dei blocchi della Home, delle parole di MATEIRA, degli organi e delle persone, con flusso bozza/pubblicato. Node.js e TypeScript, server `http` nativo, Prisma 7, PostgreSQL.
+
+Il sito che usa questa API è [Mateira_FE](https://github.com/Simone754/Mateira_FE).
 
 ## Requisiti
 
