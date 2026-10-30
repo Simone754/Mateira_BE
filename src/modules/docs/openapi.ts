@@ -2855,7 +2855,7 @@ export const openApiSpec = {
           title: { type: "string", maxLength: DOCUMENT_TITLE_MAX, description: "Titolo, su una sola riga.", example: "Statuto della Fondazione" },
           category: ref("DocumentCategory"),
           section: { type: "string", nullable: true, maxLength: DOCUMENT_SECTION_MAX, description: "Sezione, su una sola riga, facoltativa.", example: "Statuto e regolamenti" },
-          date: { type: "string", pattern: DATE_PATTERN, description: "Giorno del documento: `2026-03-01` (l'ora, se c'è, viene scartata).", example: "2026-03-01" },
+          date: { type: "string", pattern: DATE_PATTERN, description: "Giorno del documento: `2026-03-01` (con un orario conta il giorno UTC di quell'istante).", example: "2026-03-01" },
           description: { type: "string", nullable: true, maxLength: DOCUMENT_DESCRIPTION_MAX, description: "Descrizione facoltativa." },
           fileId: { type: "string", format: "uuid", nullable: true, description: "Id di un media esistente di tipo PDF.", example: MEDIA_ID },
           externalUrl: {
@@ -2931,7 +2931,7 @@ export const openApiSpec = {
           title: { type: "string", maxLength: PUBLICATION_TITLE_MAX, description: "Titolo, su una sola riga.", example: "Rapporto sullo stato dei territori costieri" },
           type: ref("PublicationType"),
           authors: { type: "string", nullable: true, maxLength: PUBLICATION_AUTHORS_MAX, description: "Autori, testo libero su una sola riga, facoltativo.", example: "A. Rossi, M. Bianchi" },
-          date: { type: "string", pattern: DATE_PATTERN, description: "Giorno della pubblicazione: `2026-06-15` (l'ora, se c'è, viene scartata).", example: "2026-06-15" },
+          date: { type: "string", pattern: DATE_PATTERN, description: "Giorno della pubblicazione: `2026-06-15` (con un orario conta il giorno UTC di quell'istante).", example: "2026-06-15" },
           abstract: { type: "string", nullable: true, maxLength: PUBLICATION_ABSTRACT_MAX, description: "Sintesi facoltativa." },
           fileId: { type: "string", format: "uuid", nullable: true, description: "Id di un media esistente di tipo PDF.", example: MEDIA_ID },
           externalUrl: {

@@ -93,7 +93,7 @@ export function publicCategoryFilter(url: URL): DocumentCategoryValue {
   return category;
 }
 
-const LIST_ORDER: Prisma.DocumentOrderByWithRelationInput[] = [{ date: "desc" }, { createdAt: "desc" }, { id: "asc" }];
+const LIST_ORDER: Prisma.DocumentOrderByWithRelationInput[] = [{ date: "desc" }, { createdAt: "asc" }, { id: "asc" }];
 
 /** The documents that match, newest first. */
 export async function listAdminDocuments(where: Prisma.DocumentWhereInput): Promise<DocumentWithFile[]> {
