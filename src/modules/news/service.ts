@@ -40,6 +40,22 @@ const EXCERPT_LENGTH = 220;
 /** How many times a write is retried when a concurrent request takes the slug first. */
 export const SLUG_ATTEMPTS = 10;
 
+/** An absolute http or https address of at most 500 characters, in its normal form; 400 naming `field` otherwise. */
+export function parseHttpUrl(url: unknown, field: string): string {
+  if (typeof url !== "string" || url.length > 500) throw httpError(400, `${field} is not valid`);
+
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    throw httpError(400, `${field} is not valid`);
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    throw httpError(400, `${field} must be http or https`);
+  }
+  return parsed.toString();
+}
+
 export function parseExternalLinks(value: unknown): ExternalLink[] {
   if (!Array.isArray(value) || value.length > LINKS_MAX) {
     throw httpError(400, `externalLinks must be a list of at most ${LINKS_MAX} items`);
@@ -51,18 +67,8 @@ export function parseExternalLinks(value: unknown): ExternalLink[] {
     if (typeof label !== "string" || !label.trim() || label.trim().length > 120) {
       throw httpError(400, "externalLinks label is required (max 120)");
     }
-    if (typeof url !== "string" || url.length > 500) throw httpError(400, "externalLinks url is not valid");
-
-    let parsed: URL;
-    try {
-      parsed = new URL(url);
-    } catch {
-      throw httpError(400, "externalLinks url is not valid");
-    }
-    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
-      throw httpError(400, "externalLinks url must be http or https");
-    }
-    return { label: label.trim(), url: parsed.toString() };
+    const parsedUrl = parseHttpUrl(url, "externalLinks url");
+    return { label: label.trim(), url: parsedUrl };
   });
 }
 

@@ -133,3 +133,8 @@ export function assertOnlyKeys(o: Obj, allowed: readonly string[]): void {
     if (!allowed.includes(key)) throw httpError(400, `${key} is not allowed`);
   }
 }
+
+/** The day of an instant (UTC), as midnight UTC: dates of documents and publications carry no time. */
+export function toUtcDay(date: Date): Date {
+  return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
+}

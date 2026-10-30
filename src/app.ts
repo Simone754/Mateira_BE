@@ -6,6 +6,7 @@ import { HttpError } from "./lib/httpErrors";
 import { isGuardedAdminRequest } from "./middlewares/adminGuard";
 import { type AdminSession, requireAdmin } from "./middlewares/requireAdmin";
 import { handleAuth } from "./modules/auth/routes";
+import { handleDocuments } from "./modules/documents/routes";
 import { handleDocs } from "./modules/docs/routes";
 import { handleHome } from "./modules/home/routes";
 import { handleMedia } from "./modules/media/routes";
@@ -82,6 +83,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
   if (await handleWords(req, res, url, parts, session)) return;
   if (await handleOrgans(req, res, url, parts, session)) return;
   if (await handlePeople(req, res, url, parts, session)) return;
+  if (await handleDocuments(req, res, url, parts, session)) return;
 
   notFound(res);
 }

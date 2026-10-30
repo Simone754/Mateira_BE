@@ -50,16 +50,18 @@ model RefreshToken {
 }
 
 model Media {
-  id             String   @id @default(uuid())
-  bucket         String
-  objectKey      String   @unique
-  mimeType       String
-  size           Int?
-  alt            String?
-  createdAt      DateTime @default(now())
-  coverOf        News[]   @relation("NewsImage")
-  attachmentOf   News[]   @relation("NewsAttachments")
-  photoOf        Person[] @relation("PersonPhoto")
+  id                String        @id @default(uuid())
+  bucket            String
+  objectKey         String        @unique
+  mimeType          String
+  size              Int?
+  alt               String?
+  createdAt         DateTime      @default(now())
+  coverOf           News[]        @relation("NewsImage")
+  attachmentOf      News[]        @relation("NewsAttachments")
+  photoOf           Person[]      @relation("PersonPhoto")
+  documentFileOf    Document[]    @relation("DocumentFile")
+  publicationFileOf Publication[] @relation("PublicationFile")
 }
 
 model News {
@@ -172,4 +174,59 @@ model PersonRole {
 
   @@unique([personId, kind, organId], map: "PersonRole_personId_kind_organId_key")
   @@index([kind, organId, position])
+}
+
+enum DocumentCategory {
+  INSTITUTIONAL
+  TRANSPARENCY
+}
+
+enum PublicationType {
+  RESEARCH
+  REPORT
+  PAPER
+  PUBLICATION
+  DATA
+  ATLAS
+  SCENARIO
+  CITIZEN_SCIENCE
+  LIVING_ARCHIVE
+}
+
+// A file (Media) or an external URL, never both: the CHECK "Document_file_xor_url" lives only in the migration.
+model Document {
+  id          String           @id @default(uuid())
+  title       String
+  category    DocumentCategory
+  section     String?
+  date        DateTime
+  description String?          @db.Text
+  fileId      String?
+  file        Media?           @relation("DocumentFile", fields: [fileId], references: [id], onDelete: SetNull)
+  externalUrl String?
+  status      ContentStatus    @default(DRAFT)
+  publishedAt DateTime?
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+
+  @@index([category, status, section, date])
+}
+
+// A file (Media) or an external URL, never both: the CHECK "Publication_file_xor_url" lives only in the migration.
+model Publication {
+  id          String          @id @default(uuid())
+  title       String
+  type        PublicationType
+  authors     String?
+  date        DateTime
+  abstract    String?         @db.Text
+  fileId      String?
+  file        Media?          @relation("PublicationFile", fields: [fileId], references: [id], onDelete: SetNull)
+  externalUrl String?
+  status      ContentStatus   @default(DRAFT)
+  publishedAt DateTime?
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+
+  @@index([status, type, date])
 }
