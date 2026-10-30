@@ -8,14 +8,10 @@ import { optString, optUuid } from "./validate";
 
 type Obj = Record<string, unknown>;
 
-/** Documents and publications point to an uploaded PDF (a Media) or to an external address: exactly one of the two. */
-export const EXTERNAL_URL_MAX = 500;
-export const FILE_OR_URL = "a file or an external URL is required, not both";
+import { EXTERNAL_URL_MAX, FILE_OR_URL, type FileRef, type LinkFields, type LinkPublic } from "./fileLinkTypes";
 
-export type LinkFields = { fileId?: string | null; externalUrl?: string | null };
-
-export type LinkPublic = { url: string | null; kind: "file" | "external"; mimeType: string | null };
-export type FileRef = { id: string; url: string | null; mimeType: string; alt: string | null };
+export { EXTERNAL_URL_MAX, FILE_OR_URL };
+export type { FileRef, LinkFields, LinkPublic };
 
 /** `fileId` and `externalUrl` of a request body: undefined = not sent, null (or an empty string) = cleared. */
 export function parseLinkFields(o: Obj): LinkFields {

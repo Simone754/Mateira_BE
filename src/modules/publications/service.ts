@@ -6,13 +6,12 @@ import { assertOneLink, type LinkFields, parseLinkFields, publicLink, serializeF
 import { httpError } from "../../lib/httpErrors";
 import { assertOnlyKeys, optDate, optEnum, optLine, optText, reqDate, reqEnum, reqLine, toUtcDay } from "../../lib/validate";
 import { CONTENT_STATUSES, type ContentStatusValue } from "../organs/dto";
-import { PUBLICATION_TYPES, type PublicationAdmin, type PublicationPublic, type PublicationTypeValue } from "./dto";
+import { PUBLICATION_TYPES, PUBLICATION_TITLE_MAX, PUBLICATION_AUTHORS_MAX, PUBLICATION_ABSTRACT_MAX, type PublicationAdmin, type PublicationPublic, type PublicationTypeValue } from "./dto";
+
+export { PUBLICATION_TITLE_MAX, PUBLICATION_AUTHORS_MAX, PUBLICATION_ABSTRACT_MAX } from "./dto";
 
 type Obj = Record<string, unknown>;
 
-export const PUBLICATION_TITLE_MAX = 200;
-export const PUBLICATION_AUTHORS_MAX = 300;
-export const PUBLICATION_ABSTRACT_MAX = 3000;
 
 const PUBLICATION_KEYS = [
   "title", "type", "authors", "date", "abstract", "fileId", "externalUrl", "status",

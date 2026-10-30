@@ -4,16 +4,15 @@ import type { Prisma } from "@prisma/client";
 
 import { assertOneLink, HAS_LINK, type LinkFields, parseLinkFields, publicLink, serializeFile } from "../../lib/fileLink";
 import { httpError } from "../../lib/httpErrors";
-import { assertOnlyKeys, optDate, optEnum, optLine, optText, reqDate, reqEnum, reqLine, reqText, toUtcDay } from "../../lib/validate";
+import { assertOnlyKeys, optDate, optEnum, optLine, optText, reqDate, reqEnum, reqLine, toUtcDay } from "../../lib/validate";
 import { prisma } from "../../plugins/prisma";
 import { CONTENT_STATUSES, type ContentStatusValue } from "../organs/dto";
-import { DOCUMENT_CATEGORIES, type DocumentAdmin, type DocumentCategoryValue, type DocumentPublic } from "./dto";
+import { DOCUMENT_CATEGORIES, DOCUMENT_TITLE_MAX, DOCUMENT_SECTION_MAX, DOCUMENT_DESCRIPTION_MAX, type DocumentAdmin, type DocumentCategoryValue, type DocumentPublic } from "./dto";
+
+export { DOCUMENT_TITLE_MAX, DOCUMENT_SECTION_MAX, DOCUMENT_DESCRIPTION_MAX } from "./dto";
 
 type Obj = Record<string, unknown>;
 
-export const DOCUMENT_TITLE_MAX = 200;
-export const DOCUMENT_SECTION_MAX = 120;
-export const DOCUMENT_DESCRIPTION_MAX = 1000;
 
 const DOCUMENT_KEYS = [
   "title", "category", "section", "date", "description", "fileId", "externalUrl", "status",

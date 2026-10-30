@@ -25,6 +25,13 @@ import {
   TICKER_ITEMS_MAX,
   TICKER_TEXT_MAX,
 } from "../src/modules/home/service";
+import { EXTERNAL_URL_MAX } from "../src/lib/fileLinkTypes";
+import { DOCUMENT_CATEGORIES } from "../src/modules/documents/dto";
+import {
+  DOCUMENT_DESCRIPTION_MAX,
+  DOCUMENT_SECTION_MAX,
+  DOCUMENT_TITLE_MAX,
+} from "../src/modules/documents/service";
 import { newObjectKey } from "../src/modules/media/service";
 import { ORGAN_CATEGORIES } from "../src/modules/organs/dto";
 import {
@@ -34,6 +41,12 @@ import {
 } from "../src/modules/organs/service";
 import { BIO_MAX, PERSON_NAME_MAX, ROLES_MAX, ROLE_TITLE_MAX } from "../src/modules/people/service";
 import { PERSON_ROLE_KINDS, PUBLIC_PERSON_ROLE_KINDS } from "../src/modules/people/dto";
+import { PUBLICATION_TYPES } from "../src/modules/publications/dto";
+import {
+  PUBLICATION_ABSTRACT_MAX,
+  PUBLICATION_AUTHORS_MAX,
+  PUBLICATION_TITLE_MAX,
+} from "../src/modules/publications/service";
 import { WORD_PAGES } from "../src/modules/words/dto";
 import { CLOSING_MAX, ETYMOLOGY_MAX, MEANING_MAX, POSITION_MAX, TERM_MAX } from "../src/modules/words/service";
 import { prisma } from "../src/plugins/prisma";
@@ -110,6 +123,18 @@ const ROUTES = [
   "GET /api/admin/people/{id}",
   "PATCH /api/admin/people/{id}",
   "DELETE /api/admin/people/{id}",
+  "GET /api/public/documents",
+  "GET /api/public/publications",
+  "GET /api/admin/documents",
+  "POST /api/admin/documents",
+  "GET /api/admin/documents/{id}",
+  "PATCH /api/admin/documents/{id}",
+  "DELETE /api/admin/documents/{id}",
+  "GET /api/admin/publications",
+  "POST /api/admin/publications",
+  "GET /api/admin/publications/{id}",
+  "PATCH /api/admin/publications/{id}",
+  "DELETE /api/admin/publications/{id}",
 ];
 
 // The admin routes that are open on purpose: they are how a session starts, renews and ends.
@@ -162,7 +187,7 @@ test("GET /openapi.json serves the OpenAPI 3.0.3 document with every route", asy
   assert.deepEqual(operationsOf(res.json).map((o) => o.key).sort(), [...ROUTES].sort());
   assert.deepEqual(
     res.json.tags.map((tag: { name: string }) => tag.name),
-    ["Sistema", "Autenticazione", "Media", "News (admin)", "News (pubbliche)", "Home (admin)", "Home (pubblica)", "Parole (admin)", "Parole (pubblica)", "Organi (admin)", "Persone (admin)", "Governance e persone (pubblica)"],
+    ["Sistema", "Autenticazione", "Media", "News (admin)", "News (pubbliche)", "Home (admin)", "Home (pubblica)", "Parole (admin)", "Parole (pubblica)", "Organi (admin)", "Persone (admin)", "Governance e persone (pubblica)", "Documenti (admin)", "Pubblicazioni (admin)", "Documenti e pubblicazioni (pubblica)"],
   );
   assert.deepEqual(res.json, JSON.parse(JSON.stringify(openApiSpec)));
 });
@@ -254,10 +279,14 @@ test("the list filters are not prefilled: no example or default on category and 
     }
   }
   assert.deepEqual(checked.sort(), [
+    "GET /api/admin/documents category",
+    "GET /api/admin/documents status",
     "GET /api/admin/news category",
     "GET /api/admin/news status",
     "GET /api/admin/organs category",
     "GET /api/admin/people status",
+    "GET /api/admin/publications status",
+    "GET /api/public/documents category",
     "GET /api/public/news category",
     "GET /api/public/organs category",
   ]);
@@ -500,6 +529,9 @@ const BARE_REQUEST_STATUS: Record<string, number> = {
   "GET /api/public/organs": 200,
   // `role` is required on the public list of people.
   "GET /api/public/people": 400,
+  // `category` is required on the public list of documents.
+  "GET /api/public/documents": 400,
+  "GET /api/public/publications": 200,
 };
 
 // An additional guard only: the admin routers answer 401 before they look at the path, so this does not prove that a
@@ -556,6 +588,13 @@ type Context = {
   personId: string;
   /** The person the POST call creates. */
   createdPersonId: string;
+  /** A PDF media, a published document and a published publication, made before the calls. */
+  pdfId: string;
+  documentId: string;
+  publicationId: string;
+  /** The document and the publication the POST calls create. */
+  createdDocumentId: string;
+  createdPublicationId: string;
 };
 
 type Call = {
@@ -802,6 +841,78 @@ const CALLS: Call[] = [
     send: (r, ctx) => r("PATCH", `/api/admin/people/${ctx.personId}`, { token: ctx.token, body: { bio: "Biografia aggiornata." } }),
     then: (res) => assert.equal(res.json.bio, "Biografia aggiornata."),
   },
+  {
+    key: "GET /api/public/documents",
+    status: 200,
+    send: (r) => r("GET", "/api/public/documents?category=INSTITUTIONAL"),
+    then: (res, ctx) => assert.deepEqual(res.json.documents.map((d: { id: string }) => d.id), [ctx.documentId]),
+  },
+  {
+    key: "GET /api/public/publications",
+    status: 200,
+    send: (r) => r("GET", "/api/public/publications?type=REPORT"),
+    then: (res, ctx) => assert.deepEqual(res.json.items.map((p: { id: string }) => p.id), [ctx.publicationId]),
+  },
+  {
+    key: "GET /api/admin/documents",
+    status: 200,
+    send: (r, ctx) => r("GET", "/api/admin/documents?category=INSTITUTIONAL&status=PUBLISHED", { token: ctx.token }),
+    then: (res, ctx) => assert.ok(res.json.documents.some((d: { id: string }) => d.id === ctx.documentId)),
+  },
+  {
+    key: "POST /api/admin/documents",
+    status: 201,
+    send: (r, ctx) =>
+      r("POST", "/api/admin/documents", {
+        token: ctx.token,
+        body: { title: "Creato dal test", category: "TRANSPARENCY", date: "2026-10-02", fileId: ctx.pdfId },
+      }),
+    then: (res, ctx) => {
+      ctx.createdDocumentId = res.json.id;
+    },
+  },
+  {
+    key: "GET /api/admin/documents/{id}",
+    status: 200,
+    send: (r, ctx) => r("GET", `/api/admin/documents/${ctx.documentId}`, { token: ctx.token }),
+    then: (res, ctx) => assert.equal(res.json.id, ctx.documentId),
+  },
+  {
+    key: "PATCH /api/admin/documents/{id}",
+    status: 200,
+    send: (r, ctx) => r("PATCH", `/api/admin/documents/${ctx.documentId}`, { token: ctx.token, body: { section: "Bilanci" } }),
+    then: (res) => assert.equal(res.json.section, "Bilanci"),
+  },
+  {
+    key: "GET /api/admin/publications",
+    status: 200,
+    send: (r, ctx) => r("GET", "/api/admin/publications?type=REPORT&status=PUBLISHED", { token: ctx.token }),
+    then: (res, ctx) => assert.ok(res.json.items.some((p: { id: string }) => p.id === ctx.publicationId)),
+  },
+  {
+    key: "POST /api/admin/publications",
+    status: 201,
+    send: (r, ctx) =>
+      r("POST", "/api/admin/publications", {
+        token: ctx.token,
+        body: { title: "Creata dal test", type: "PAPER", date: "2026-10-02", externalUrl: "https://example.org/paper.pdf" },
+      }),
+    then: (res, ctx) => {
+      ctx.createdPublicationId = res.json.id;
+    },
+  },
+  {
+    key: "GET /api/admin/publications/{id}",
+    status: 200,
+    send: (r, ctx) => r("GET", `/api/admin/publications/${ctx.publicationId}`, { token: ctx.token }),
+    then: (res, ctx) => assert.equal(res.json.id, ctx.publicationId),
+  },
+  {
+    key: "PATCH /api/admin/publications/{id}",
+    status: 200,
+    send: (r, ctx) => r("PATCH", `/api/admin/publications/${ctx.publicationId}`, { token: ctx.token, body: { authors: "A. Rossi" } }),
+    then: (res) => assert.equal(res.json.authors, "A. Rossi"),
+  },
   { key: "POST /api/admin/auth/logout", status: 204, send: (r, ctx) => r("POST", "/api/admin/auth/logout", { cookie: ctx.cookie }) },
   {
     key: "DELETE /api/admin/news/{id}",
@@ -817,6 +928,16 @@ const CALLS: Call[] = [
     key: "DELETE /api/admin/words/{id}",
     status: 204,
     send: (r, ctx) => r("DELETE", `/api/admin/words/${ctx.wordId}`, { token: ctx.token }),
+  },
+  {
+    key: "DELETE /api/admin/documents/{id}",
+    status: 204,
+    send: (r, ctx) => r("DELETE", `/api/admin/documents/${ctx.createdDocumentId}`, { token: ctx.token }),
+  },
+  {
+    key: "DELETE /api/admin/publications/{id}",
+    status: 204,
+    send: (r, ctx) => r("DELETE", `/api/admin/publications/${ctx.createdPublicationId}`, { token: ctx.token }),
   },
   {
     key: "DELETE /api/admin/people/{id}",
@@ -896,6 +1017,29 @@ test("every documented operation answers on the real router with a status the do
       },
     },
   });
+  const pdf = await prisma.media.create({
+    data: { bucket: "mateira-media", objectKey: newObjectKey("application/pdf"), mimeType: "application/pdf", size: 1234, alt: "Statuto" },
+  });
+  const document = await prisma.document.create({
+    data: {
+      title: "Documento di prova",
+      category: "INSTITUTIONAL",
+      date: new Date("2026-03-01T00:00:00Z"),
+      fileId: pdf.id,
+      status: "PUBLISHED",
+      publishedAt: new Date("2026-10-01T09:00:00Z"),
+    },
+  });
+  const publication = await prisma.publication.create({
+    data: {
+      title: "Pubblicazione di prova",
+      type: "REPORT",
+      date: new Date("2026-03-01T00:00:00Z"),
+      externalUrl: "https://example.org/report.pdf",
+      status: "PUBLISHED",
+      publishedAt: new Date("2026-10-01T09:00:00Z"),
+    },
+  });
   const ctx: Context = {
     token,
     cookie,
@@ -909,6 +1053,11 @@ test("every documented operation answers on the real router with a status the do
     createdOrganId: "",
     personId: person.id,
     createdPersonId: "",
+    pdfId: pdf.id,
+    documentId: document.id,
+    publicationId: publication.id,
+    createdDocumentId: "",
+    createdPublicationId: "",
   };
 
   const documented = new Map(operationsOf(openApiSpec).map((o) => [o.key, o.op]));
@@ -953,7 +1102,7 @@ test("an unknown id or slug answers 404 on every route that takes one", async ()
     assert.deepEqual(res.json, { error: "Not found" }, key);
     checked++;
   }
-  assert.equal(checked, 18);
+  assert.equal(checked, 24);
 });
 
 test("the documented Home request examples are accepted by the real router", async () => {
@@ -1503,4 +1652,212 @@ test("real organ and people answers, null parts included, match the documented r
   const { kind, ...roleWithoutKind } = full.json.roles[0];
   assert.ok(kind);
   assert.equal(personCreated({ ...full.json, roles: [roleWithoutKind] }), false);
+});
+
+test("the limits written in the document and publication schemas are the ones the code enforces", () => {
+  const schemas: any = openApiSpec.components.schemas;
+  assert.deepEqual(schemas.DocumentCategory.enum, [...DOCUMENT_CATEGORIES]);
+  assert.deepEqual(schemas.PublicationType.enum, [...PUBLICATION_TYPES]);
+
+  for (const name of ["DocumentCreateRequest", "DocumentUpdateRequest"]) {
+    const properties = schemas[name].properties;
+    assert.equal(properties.title.maxLength, DOCUMENT_TITLE_MAX, name);
+    assert.equal(properties.section.maxLength, DOCUMENT_SECTION_MAX, name);
+    assert.equal(properties.description.maxLength, DOCUMENT_DESCRIPTION_MAX, name);
+    assert.equal(properties.externalUrl.maxLength, EXTERNAL_URL_MAX, name);
+    assert.equal(schemas[name].additionalProperties, false, name);
+  }
+  assert.deepEqual(schemas.DocumentCreateRequest.required, ["title", "category", "date"]);
+  assert.equal(schemas.DocumentUpdateRequest.required, undefined);
+  assert.equal(schemas.DocumentUpdateRequest.minProperties, 1);
+
+  for (const name of ["PublicationCreateRequest", "PublicationUpdateRequest"]) {
+    const properties = schemas[name].properties;
+    assert.equal(properties.title.maxLength, PUBLICATION_TITLE_MAX, name);
+    assert.equal(properties.authors.maxLength, PUBLICATION_AUTHORS_MAX, name);
+    assert.equal(properties.abstract.maxLength, PUBLICATION_ABSTRACT_MAX, name);
+    assert.equal(properties.externalUrl.maxLength, EXTERNAL_URL_MAX, name);
+    assert.equal(schemas[name].additionalProperties, false, name);
+  }
+  assert.deepEqual(schemas.PublicationCreateRequest.required, ["title", "type", "date"]);
+  assert.equal(schemas.PublicationUpdateRequest.required, undefined);
+  assert.equal(schemas.PublicationUpdateRequest.minProperties, 1);
+
+  const paths: any = openApiSpec.paths;
+  const limitOf = (pathName: string) => resolved(paths[pathName].get.parameters.map(resolved).find((p: any) => p.name === "limit")).schema;
+  assert.deepEqual([limitOf("/api/public/publications").default, limitOf("/api/public/publications").maximum], [12, 50]);
+  assert.deepEqual([limitOf("/api/admin/publications").default, limitOf("/api/admin/publications").maximum], [20, 100]);
+});
+
+test("the document and publication filters are not prefilled and the documented 400s are what the router answers", async () => {
+  const { token } = await loginAsAdmin(request);
+  const paths: any = openApiSpec.paths;
+  for (const [pathName, names] of [
+    ["/api/public/documents", ["category"]],
+    ["/api/admin/documents", ["category", "status"]],
+    ["/api/public/publications", ["type", "limit", "page"]],
+    ["/api/admin/publications", ["type", "status", "limit", "page"]],
+  ] as [string, string[]][]) {
+    const parameters = paths[pathName].get.parameters.map(resolved);
+    assert.deepEqual(parameters.map((p: any) => p.name), names, pathName);
+    for (const parameter of parameters) {
+      assert.equal(parameter.in, "query");
+      if (["limit", "page"].includes(parameter.name)) continue;
+      assert.equal(parameter.required, pathName === "/api/public/documents", `${pathName} ${parameter.name}`);
+      for (const node of [parameter, resolved(parameter.schema)]) {
+        for (const keyword of ["example", "examples", "default"]) assert.equal(node[keyword], undefined, `${pathName} ${keyword}`);
+      }
+    }
+  }
+
+  const cases: [string, string, boolean][] = [
+    ["/api/public/documents", "/api/public/documents", false],
+    ["/api/public/documents?category=NOPE", "/api/public/documents", false],
+    ["/api/admin/documents?category=NOPE", "/api/admin/documents", true],
+    ["/api/public/publications?type=NOPE", "/api/public/publications", false],
+    ["/api/admin/publications?type=NOPE", "/api/admin/publications", true],
+  ];
+  for (const [url, pathName, admin] of cases) {
+    const res = await request("GET", url, admin ? { token } : {});
+    assert.equal(res.status, 400, url);
+    const documented = paths[pathName].get.responses["400"];
+    assert.ok(documented, url);
+    if (url === "/api/public/documents?category=NOPE") {
+      // the public list says "required", the message of a wrong value is the one of the shared filter
+      assert.match(res.json.error, /category/);
+      continue;
+    }
+    assert.deepEqual(res.json, documented.content["application/json"].example, url);
+  }
+
+  // The rule "a file or a link": the documented 400 of the create operations is the real message.
+  for (const pathName of ["/api/admin/documents", "/api/admin/publications"]) {
+    const body = pathName.endsWith("documents")
+      ? { title: "x", category: "INSTITUTIONAL", date: "2026-01-01" }
+      : { title: "x", type: "REPORT", date: "2026-01-01" };
+    const res = await request("POST", pathName, { token, body });
+    assert.equal(res.status, 400);
+    assert.deepEqual(res.json, paths[pathName].post.responses["400"].content["application/json"].example, pathName);
+  }
+});
+
+test("the documented document and publication request examples are accepted by the real router", async () => {
+  await resetDb();
+  const { token } = await loginAsAdmin(request);
+  const paths: any = openApiSpec.paths;
+  const examplesOf = (op: any): Record<string, { value: any }> => op.requestBody.content["application/json"].examples;
+
+  // The examples name a PDF by the documented sample id: register one with that id, as the reader of the document would have.
+  const documentExamples = examplesOf(paths["/api/admin/documents"].post);
+  const mediaId: string = documentExamples.conFile.value.fileId;
+  await prisma.media.create({
+    data: { id: mediaId, bucket: "mateira-media", objectKey: newObjectKey("application/pdf"), mimeType: "application/pdf", alt: "Esempio" },
+  });
+
+  assert.ok(Object.keys(documentExamples).length >= 2);
+  let documentId = "";
+  for (const [name, example] of Object.entries(documentExamples)) {
+    const res = await request("POST", "/api/admin/documents", { token, body: example.value });
+    assert.equal(res.status, 201, `${name}: ${JSON.stringify(res.json)}`);
+    documentId ||= res.json.id;
+  }
+  // The first document has the file: the patches run in order and the last one goes from the file to a link.
+  const documentPatches = examplesOf(paths["/api/admin/documents/{id}"].patch);
+  assert.ok(Object.keys(documentPatches).length >= 3);
+  for (const [name, example] of Object.entries(documentPatches)) {
+    const res = await request("PATCH", `/api/admin/documents/${documentId}`, { token, body: example.value });
+    assert.equal(res.status, 200, `${name}: ${JSON.stringify(res.json)}`);
+  }
+
+  const publicationExamples = examplesOf(paths["/api/admin/publications"].post);
+  assert.ok(Object.keys(publicationExamples).length >= 2);
+  let publicationId = "";
+  for (const [name, example] of Object.entries(publicationExamples)) {
+    const res = await request("POST", "/api/admin/publications", { token, body: example.value });
+    assert.equal(res.status, 201, `${name}: ${JSON.stringify(res.json)}`);
+    publicationId ||= res.json.id;
+  }
+  // The first publication has a link: the last patch goes from the link to the file.
+  const publicationPatches = examplesOf(paths["/api/admin/publications/{id}"].patch);
+  assert.ok(Object.keys(publicationPatches).length >= 3);
+  for (const [name, example] of Object.entries(publicationPatches)) {
+    const res = await request("PATCH", `/api/admin/publications/${publicationId}`, { token, body: example.value });
+    assert.equal(res.status, 200, `${name}: ${JSON.stringify(res.json)}`);
+  }
+});
+
+test("real document and publication answers, null parts included, match the documented response schemas", async () => {
+  await resetDb();
+  const { token } = await loginAsAdmin(request);
+  const ajv = new Ajv({ strict: false, allErrors: true, validateFormats: false });
+  ajv.addSchema(structuredClone(openApiSpec), "openapi");
+  const conforms = (label: string, validate: ReturnType<typeof validatorFor>, value: unknown) => {
+    assert.ok(validate(value), `${label} does not match the document: ${ajv.errorsText(validate.errors)}\n${JSON.stringify(value)}`);
+  };
+  const send = (method: string, path: string, body?: unknown) => request(method, path, { token, body });
+
+  const pdf = await prisma.media.create({
+    data: { bucket: "mateira-media", objectKey: newObjectKey("application/pdf"), mimeType: "application/pdf", alt: "Statuto" },
+  });
+  const withFile = await send("POST", "/api/admin/documents", {
+    title: "Statuto", category: "INSTITUTIONAL", section: "Statuto", date: "2026-03-01", description: "Testo.", fileId: pdf.id, status: "PUBLISHED",
+  });
+  const withLink = await send("POST", "/api/admin/documents", {
+    title: "Bilancio", category: "INSTITUTIONAL", date: "2026-03-01", externalUrl: "https://example.org/b.pdf", status: "PUBLISHED",
+  });
+  assert.equal(withLink.json.file, null, "the case under test is really there");
+  assert.equal(withLink.json.section, null);
+  const created = validatorFor(ajv, "/api/admin/documents", "post", "201");
+  conforms("POST /api/admin/documents with file", created, withFile.json);
+  conforms("POST /api/admin/documents with link", created, withLink.json);
+
+  conforms("GET /api/admin/documents", validatorFor(ajv, "/api/admin/documents", "get", "200"), (await send("GET", "/api/admin/documents")).json);
+  conforms(
+    "GET /api/admin/documents/{id}",
+    validatorFor(ajv, "/api/admin/documents/{id}", "get", "200"),
+    (await send("GET", `/api/admin/documents/${withFile.json.id}`)).json,
+  );
+  conforms(
+    "PATCH /api/admin/documents/{id}",
+    validatorFor(ajv, "/api/admin/documents/{id}", "patch", "200"),
+    (await send("PATCH", `/api/admin/documents/${withFile.json.id}`, { section: null })).json,
+  );
+  const publicDocuments = (await send("GET", "/api/public/documents?category=INSTITUTIONAL")).json;
+  assert.equal(publicDocuments.documents.length, 2);
+  assert.deepEqual(publicDocuments.documents.map((d: any) => d.link.kind).sort(), ["external", "file"]);
+  conforms("GET /api/public/documents", validatorFor(ajv, "/api/public/documents", "get", "200"), publicDocuments);
+
+  const publication = await send("POST", "/api/admin/publications", {
+    title: "Report", type: "REPORT", date: "2026-06-15", authors: "A. Rossi", abstract: "Sintesi.", fileId: pdf.id, status: "PUBLISHED",
+  });
+  const bare = await send("POST", "/api/admin/publications", {
+    title: "Paper", type: "PAPER", date: "2026-06-16", externalUrl: "https://example.org/p.pdf", status: "PUBLISHED",
+  });
+  assert.equal(bare.json.authors, null, "the case under test is really there");
+  assert.equal(bare.json.file, null);
+  const publicationCreated = validatorFor(ajv, "/api/admin/publications", "post", "201");
+  conforms("POST /api/admin/publications", publicationCreated, publication.json);
+  conforms("POST /api/admin/publications minimal", publicationCreated, bare.json);
+  conforms("GET /api/admin/publications", validatorFor(ajv, "/api/admin/publications", "get", "200"), (await send("GET", "/api/admin/publications")).json);
+  conforms(
+    "GET /api/admin/publications/{id}",
+    validatorFor(ajv, "/api/admin/publications/{id}", "get", "200"),
+    (await send("GET", `/api/admin/publications/${publication.json.id}`)).json,
+  );
+  conforms(
+    "PATCH /api/admin/publications/{id}",
+    validatorFor(ajv, "/api/admin/publications/{id}", "patch", "200"),
+    (await send("PATCH", `/api/admin/publications/${publication.json.id}`, { abstract: null })).json,
+  );
+  const publicPublications = (await send("GET", "/api/public/publications")).json;
+  assert.equal(publicPublications.items.length, 2);
+  conforms("GET /api/public/publications", validatorFor(ajv, "/api/public/publications", "get", "200"), publicPublications);
+
+  // The check can fail: a category outside the list, a document without its link, a link of an unknown kind.
+  assert.equal(created({ ...withFile.json, category: "OTHER" }), false);
+  const { externalUrl, ...withoutUrl } = withFile.json;
+  assert.equal(externalUrl, null);
+  assert.equal(created(withoutUrl), false);
+  const publicValidator = validatorFor(ajv, "/api/public/documents", "get", "200");
+  assert.equal(publicValidator({ documents: [{ ...publicDocuments.documents[0], link: { url: "x", kind: "other", mimeType: null } }] }), false);
 });

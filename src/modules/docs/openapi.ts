@@ -7,8 +7,21 @@
  * Technical names, enums and error strings follow the code; descriptions are in Italian.
  */
 
+import { EXTERNAL_URL_MAX, FILE_OR_URL } from "../../lib/fileLinkTypes";
+import {
+  DOCUMENT_CATEGORIES,
+  DOCUMENT_DESCRIPTION_MAX,
+  DOCUMENT_SECTION_MAX,
+  DOCUMENT_TITLE_MAX,
+} from "../documents/dto";
 import { ORGAN_CATEGORIES } from "../organs/dto";
 import { PERSON_ROLE_KINDS, PUBLIC_PERSON_ROLE_KINDS } from "../people/dto";
+import {
+  PUBLICATION_ABSTRACT_MAX,
+  PUBLICATION_AUTHORS_MAX,
+  PUBLICATION_TITLE_MAX,
+  PUBLICATION_TYPES,
+} from "../publications/dto";
 import { WORD_PAGES } from "../words/dto";
 import { WORD_SEEDS } from "../words/seedData";
 
@@ -323,6 +336,80 @@ const homePublicExample = {
   ],
 };
 
+const DOCUMENT_ID = "2e8a5c71-4b9d-4f06-a3c2-8d1e7b5f9a40";
+const OTHER_DOCUMENT_ID = "8c3f1d6b-0a47-4e92-b5d8-3a6c9e2f7014";
+const PUBLICATION_ID = "f1b7d3a9-5c20-4e68-8a4b-9d0c2e6f1b37";
+const DOCUMENT_URL = `http://localhost:9100/mateira-media/media/2026/${MEDIA_ID}.pdf`;
+
+const documentFileExample = { id: MEDIA_ID, url: DOCUMENT_URL, mimeType: "application/pdf", alt: "Statuto della Fondazione" };
+
+const documentPublicExample = {
+  id: DOCUMENT_ID,
+  title: "Statuto della Fondazione",
+  section: "Statuto e regolamenti",
+  date: "2026-03-01T00:00:00.000Z",
+  description: "Lo statuto in vigore, approvato dal consiglio di amministrazione.",
+  link: { url: DOCUMENT_URL, kind: "file", mimeType: "application/pdf" },
+};
+
+const documentAdminExample = {
+  id: DOCUMENT_ID,
+  title: documentPublicExample.title,
+  category: "INSTITUTIONAL",
+  section: documentPublicExample.section,
+  date: documentPublicExample.date,
+  description: documentPublicExample.description,
+  file: documentFileExample,
+  externalUrl: null,
+  status: "PUBLISHED",
+  publishedAt: "2026-10-30T09:00:00.000Z",
+  createdAt: "2026-10-28T08:30:00.000Z",
+  updatedAt: "2026-10-30T09:00:00.000Z",
+};
+
+const publicationPublicExample = {
+  id: PUBLICATION_ID,
+  title: "Rapporto sullo stato dei territori costieri",
+  type: "REPORT",
+  authors: "A. Rossi, M. Bianchi",
+  date: "2026-06-15T00:00:00.000Z",
+  abstract: "Sintesi del rapporto.\n\nSecondo paragrafo della sintesi.",
+  link: { url: "https://www.example.org/rapporto-territori.pdf", kind: "external", mimeType: null },
+};
+
+const publicationAdminExample = {
+  id: PUBLICATION_ID,
+  title: publicationPublicExample.title,
+  type: "REPORT",
+  authors: publicationPublicExample.authors,
+  date: publicationPublicExample.date,
+  abstract: publicationPublicExample.abstract,
+  file: null,
+  externalUrl: publicationPublicExample.link.url,
+  status: "PUBLISHED",
+  publishedAt: "2026-10-30T09:00:00.000Z",
+  createdAt: "2026-10-28T08:30:00.000Z",
+  updatedAt: "2026-10-30T09:00:00.000Z",
+};
+
+/** The 400 answers of the filters and of the rule "a file or a link": the same messages for the public and the admin lists. */
+const DOCUMENT_CATEGORY_ERROR = `category must be one of: ${DOCUMENT_CATEGORIES.join(", ")}`;
+const PUBLIC_DOCUMENT_CATEGORY_ERROR = `category is required: ${DOCUMENT_CATEGORIES.join(", ")}`;
+const PUBLICATION_TYPE_ERROR = `type must be one of: ${PUBLICATION_TYPES.join(", ")}`;
+
+const FILE_OR_LINK_RULES =
+  "Regola del collegamento: ogni elemento rimanda a **un file PDF** già registrato tra i media (`fileId`) **oppure** a un **indirizzo esterno** (`externalUrl`, `http` o `https`, al massimo " +
+  `${EXTERNAL_URL_MAX} caratteri), mai a entrambi e mai a nessuno dei due: in creazione e dopo ogni modifica, altrimenti 400 \`${FILE_OR_URL}\`. ` +
+  "Per passare da un file a un indirizzo (o viceversa) si inviano nello stesso corpo `fileId: null` e `externalUrl`. " +
+  "Un `fileId` che non è un media esistente di tipo PDF risponde 400. Se il media viene cancellato dall'archivio `file` diventa `null`: " +
+  "l'elemento sparisce dalle letture pubbliche e il pannello lo mostra come \"file mancante\" finché non gli si assegna un nuovo file o indirizzo. ";
+
+const LINKED_TEXT_RULES =
+  "Regole dei testi: spazi ai bordi tolti, i fine riga `\\r\\n` e `\\r` diventano `\\n` prima di misurare la lunghezza, caratteri nulli o unicode spezzati rifiutati con 400. " +
+  "Titolo, sezione e autori sono su una sola riga: un a capo è 400. La descrizione e la sintesi sono testo semplice: una riga vuota separa i paragrafi. " +
+  "Un campo facoltativo vuoto o `null` vale \"assente\". La `date` è solo un giorno: l'ora viene scartata e il giorno è quello in UTC (mezzanotte UTC). " +
+  "Un campo non previsto è rifiutato con 400. ";
+
 export const openApiSpec = {
   openapi: "3.0.3",
   info: {
@@ -381,6 +468,20 @@ export const openApiSpec = {
     {
       name: "Governance e persone (pubblica)",
       description: "Gli organi e le persone pubblicati, già in ordine, senza autenticazione. Si pubblica solo ciò che è formalizzato.",
+    },
+    {
+      name: "Documenti (admin)",
+      description:
+        "I documenti istituzionali e di trasparenza, ciascuno con un file PDF o un indirizzo esterno: crea, modifica, nascondi (bozza) e cancella. Richiede il token.",
+    },
+    {
+      name: "Pubblicazioni (admin)",
+      description:
+        "Le pubblicazioni e le ricerche (report, paper, dati, atlanti...), ciascuna con un file PDF o un indirizzo esterno: crea, modifica, nascondi (bozza) e cancella. Richiede il token.",
+    },
+    {
+      name: "Documenti e pubblicazioni (pubblica)",
+      description: "I documenti e le pubblicazioni pubblicati, senza autenticazione. Compaiono solo se hanno un file o un indirizzo.",
     },
   ],
   paths: {
@@ -1423,6 +1524,311 @@ export const openApiSpec = {
         },
       },
     },
+
+    "/api/public/documents": {
+      get: {
+        tags: ["Documenti e pubblicazioni (pubblica)"],
+        operationId: "listDocumentsPublic",
+        summary: "Documenti pubblicati di una categoria",
+        description:
+          "I documenti `PUBLISHED` della categoria richiesta (`INSTITUTIONAL` per la pagina Documenti istituzionali, `TRANSPARENCY` per la Trasparenza) che hanno un link. " +
+          "Sono in ordine per `section` (alfabetico senza distinguere maiuscole, i documenti senza sezione in fondo), poi `date` dal più recente, poi data di creazione, poi id. " +
+          "`link.kind` è `file` (con il `mimeType` del media, sempre `application/pdf`) oppure `external` (con `mimeType` `null`). " +
+          "`category` è obbligatoria: assente, vuota o fuori elenco risponde 400. Nessun campo amministrativo. Senza documenti `documents` è una lista vuota.",
+        parameters: [{ $ref: "#/components/parameters/PublicDocumentCategoryFilter" }],
+        responses: {
+          "200": {
+            description: "I documenti pubblicati della categoria, in ordine.",
+            content: json(ref("DocumentPublicList"), { example: { documents: [documentPublicExample] } }),
+          },
+          "400": errorResponse("`category` manca, è vuota o non è una delle categorie ammesse.", PUBLIC_DOCUMENT_CATEGORY_ERROR),
+        },
+      },
+    },
+
+    "/api/public/publications": {
+      get: {
+        tags: ["Documenti e pubblicazioni (pubblica)"],
+        operationId: "listPublicationsPublic",
+        summary: "Pubblicazioni e ricerche pubblicate",
+        description:
+          "Le pubblicazioni `PUBLISHED` che hanno un link, dalla data più recente (a parità di giorno, la prima creata). Con `type` solo quelle di quel tipo. " +
+          "`link.kind` è `file` (con il `mimeType` del media) oppure `external` (con `mimeType` `null`). Un `type` vuoto o fuori elenco risponde 400. " +
+          "Nessun campo amministrativo.",
+        parameters: [{ $ref: "#/components/parameters/PublicationTypeFilter" }, limitParameter(12, 50), { $ref: "#/components/parameters/Page" }],
+        responses: {
+          "200": { description: "Una pagina di pubblicazioni pubblicate.", content: json(ref("PublicationPublicPage")) },
+          "400": errorResponse("`type` non è uno dei tipi ammessi (anche se vuoto).", PUBLICATION_TYPE_ERROR),
+        },
+      },
+    },
+
+    "/api/admin/documents": {
+      get: {
+        tags: ["Documenti (admin)"],
+        operationId: "listDocuments",
+        summary: "Elenco dei documenti",
+        description:
+          "Tutti i documenti, bozze e documenti senza file compresi, dalla data più recente (poi data di creazione, poi id), con il file risolto. " +
+          "Filtri facoltativi `category` e `status`, che si combinano. Un valore fuori elenco, anche vuoto, risponde 400; un filtro ripetuto vale l'ultimo.",
+        security: bearer,
+        parameters: [{ $ref: "#/components/parameters/DocumentCategoryFilter" }, { $ref: "#/components/parameters/DocumentStatusFilter" }],
+        responses: {
+          "200": { description: "I documenti.", content: json(ref("DocumentAdminList"), { example: { documents: [documentAdminExample] } }) },
+          "400": errorResponse("`category` o `status` non sono uno dei valori ammessi (anche se vuoti).", DOCUMENT_CATEGORY_ERROR),
+          "401": response("Unauthorized"),
+        },
+      },
+      post: {
+        tags: ["Documenti (admin)"],
+        operationId: "createDocument",
+        summary: "Crea un documento",
+        description:
+          "Crea un documento, per default in bozza (`DRAFT`). Con `status` `PUBLISHED` è subito pubblico e `publishedAt` è l'ora attuale. " +
+          FILE_OR_LINK_RULES +
+          LINKED_TEXT_RULES,
+        security: bearer,
+        requestBody: {
+          required: true,
+          content: json(ref("DocumentCreateRequest"), {
+            examples: {
+              conFile: {
+                summary: "Un documento istituzionale con un PDF già caricato, pubblicato",
+                value: {
+                  title: "Statuto della Fondazione",
+                  category: "INSTITUTIONAL",
+                  section: "Statuto e regolamenti",
+                  date: "2026-03-01",
+                  description: "Lo statuto in vigore.",
+                  fileId: MEDIA_ID,
+                  status: "PUBLISHED",
+                },
+              },
+              conLink: {
+                summary: "Un atto di trasparenza che rimanda a un indirizzo esterno",
+                value: {
+                  title: "Bilancio 2025",
+                  category: "TRANSPARENCY",
+                  section: "Bilanci",
+                  date: "2026-06-30T10:00:00Z",
+                  externalUrl: "https://www.example.org/bilancio-2025.pdf",
+                },
+              },
+            },
+          }),
+        },
+        responses: {
+          "201": { description: "Documento creato.", content: json(ref("DocumentAdmin")) },
+          "400": errorResponse(
+            "Body non valido: campo mancante, vuoto, su più righe o fuori limite, categoria o stato non ammessi, campo non previsto, indirizzo non http/https, " +
+              "`fileId` inesistente o non PDF, nessuno dei due o entrambi tra `fileId` ed `externalUrl`, oppure caratteri che non si possono salvare.",
+            FILE_OR_URL,
+          ),
+          "401": response("Unauthorized"),
+          "413": response("PayloadTooLarge"),
+        },
+      },
+    },
+
+    "/api/admin/documents/{id}": {
+      get: {
+        tags: ["Documenti (admin)"],
+        operationId: "getDocument",
+        summary: "Dettaglio di un documento",
+        description: "Tutti i campi, anche per le bozze, con il file risolto (`file` è `null` se il documento rimanda a un indirizzo o se il media è stato cancellato).",
+        security: bearer,
+        parameters: [{ $ref: "#/components/parameters/Id" }],
+        responses: {
+          "200": { description: "Il documento.", content: json(ref("DocumentAdmin"), { example: documentAdminExample }) },
+          "401": response("Unauthorized"),
+          "404": response("NotFound"),
+        },
+      },
+      patch: {
+        tags: ["Documenti (admin)"],
+        operationId: "updateDocument",
+        summary: "Modifica un documento",
+        description:
+          "Cambia uno o più campi; quelli non inviati restano com'erano. `section: null` e `description: null` li tolgono. " +
+          "Passando a `PUBLISHED` per la prima volta si imposta `publishedAt`; tornare a `DRAFT` ritira il documento dal pubblico ma conserva la data. " +
+          "Una modifica che lascerebbe il documento con entrambi o con nessuno tra file e indirizzo risponde 400, anche quando il documento è senza file perché il media è stato cancellato: " +
+          "in quel caso la modifica deve indicare un nuovo `fileId` o `externalUrl`. " +
+          FILE_OR_LINK_RULES +
+          LINKED_TEXT_RULES,
+        security: bearer,
+        parameters: [{ $ref: "#/components/parameters/Id" }],
+        requestBody: {
+          required: true,
+          content: json(ref("DocumentUpdateRequest"), {
+            examples: {
+              pubblica: { summary: "Pubblica un documento", value: { status: "PUBLISHED" } },
+              sezione: { summary: "Cambia sezione e data", value: { section: "Bilanci", date: "2026-07-01" } },
+              daFileALink: {
+                summary: "Passa da un file a un indirizzo esterno",
+                value: { fileId: null, externalUrl: "https://www.example.org/statuto.pdf" },
+              },
+            },
+          }),
+        },
+        responses: {
+          "200": { description: "Il documento aggiornato.", content: json(ref("DocumentAdmin")) },
+          "400": errorResponse(
+            "Body non valido: nessun campo da cambiare, campo non previsto, valori vuoti o fuori limite, `fileId` inesistente o non PDF, " +
+              "file e indirizzo entrambi presenti o entrambi assenti dopo la modifica, oppure caratteri che non si possono salvare.",
+            "nothing to change",
+          ),
+          "401": response("Unauthorized"),
+          "404": response("NotFound"),
+          "413": response("PayloadTooLarge"),
+        },
+      },
+      delete: {
+        tags: ["Documenti (admin)"],
+        operationId: "deleteDocument",
+        summary: "Elimina un documento",
+        description: "Elimina il documento; il PDF resta tra i media. Se due richieste lo eliminano insieme, una risponde 204 e l'altra 404.",
+        security: bearer,
+        parameters: [{ $ref: "#/components/parameters/Id" }],
+        responses: {
+          "204": { description: "Documento eliminato, nessun contenuto." },
+          "401": response("Unauthorized"),
+          "404": response("NotFound"),
+        },
+      },
+    },
+
+    "/api/admin/publications": {
+      get: {
+        tags: ["Pubblicazioni (admin)"],
+        operationId: "listPublications",
+        summary: "Elenco delle pubblicazioni",
+        description:
+          "Tutte le pubblicazioni, bozze e senza file comprese, dalla data più recente (a parità di giorno, la prima creata), con il file risolto. " +
+          "Filtri facoltativi `type` e `status`, che si combinano. Un valore fuori elenco, anche vuoto, risponde 400.",
+        security: bearer,
+        parameters: [
+          { $ref: "#/components/parameters/PublicationTypeFilter" },
+          { $ref: "#/components/parameters/PublicationStatusFilter" },
+          limitParameter(20, 100),
+          { $ref: "#/components/parameters/Page" },
+        ],
+        responses: {
+          "200": { description: "Una pagina di pubblicazioni.", content: json(ref("PublicationAdminPage")) },
+          "400": errorResponse("`type` o `status` non sono uno dei valori ammessi (anche se vuoti).", PUBLICATION_TYPE_ERROR),
+          "401": response("Unauthorized"),
+        },
+      },
+      post: {
+        tags: ["Pubblicazioni (admin)"],
+        operationId: "createPublication",
+        summary: "Crea una pubblicazione",
+        description:
+          "Crea una pubblicazione, per default in bozza (`DRAFT`). Con `status` `PUBLISHED` è subito pubblica e `publishedAt` è l'ora attuale. " +
+          FILE_OR_LINK_RULES +
+          LINKED_TEXT_RULES,
+        security: bearer,
+        requestBody: {
+          required: true,
+          content: json(ref("PublicationCreateRequest"), {
+            examples: {
+              conLink: {
+                summary: "Un report che rimanda a un indirizzo esterno, pubblicato",
+                value: {
+                  title: "Rapporto sullo stato dei territori costieri",
+                  type: "REPORT",
+                  authors: "A. Rossi, M. Bianchi",
+                  date: "2026-06-15",
+                  abstract: "Sintesi del rapporto.\n\nSecondo paragrafo della sintesi.",
+                  externalUrl: "https://www.example.org/rapporto-territori.pdf",
+                  status: "PUBLISHED",
+                },
+              },
+              conFile: {
+                summary: "Un paper con un PDF già caricato (bozza)",
+                value: { title: "Dinamiche costiere", type: "PAPER", date: "2026-09-02", fileId: MEDIA_ID },
+              },
+            },
+          }),
+        },
+        responses: {
+          "201": { description: "Pubblicazione creata.", content: json(ref("PublicationAdmin")) },
+          "400": errorResponse(
+            "Body non valido: campo mancante, vuoto, su più righe o fuori limite, tipo o stato non ammessi, campo non previsto, indirizzo non http/https, " +
+              "`fileId` inesistente o non PDF, nessuno dei due o entrambi tra `fileId` ed `externalUrl`, oppure caratteri che non si possono salvare.",
+            FILE_OR_URL,
+          ),
+          "401": response("Unauthorized"),
+          "413": response("PayloadTooLarge"),
+        },
+      },
+    },
+
+    "/api/admin/publications/{id}": {
+      get: {
+        tags: ["Pubblicazioni (admin)"],
+        operationId: "getPublication",
+        summary: "Dettaglio di una pubblicazione",
+        description: "Tutti i campi, anche per le bozze, con il file risolto (`file` è `null` se rimanda a un indirizzo o se il media è stato cancellato).",
+        security: bearer,
+        parameters: [{ $ref: "#/components/parameters/Id" }],
+        responses: {
+          "200": { description: "La pubblicazione.", content: json(ref("PublicationAdmin"), { example: publicationAdminExample }) },
+          "401": response("Unauthorized"),
+          "404": response("NotFound"),
+        },
+      },
+      patch: {
+        tags: ["Pubblicazioni (admin)"],
+        operationId: "updatePublication",
+        summary: "Modifica una pubblicazione",
+        description:
+          "Cambia uno o più campi; quelli non inviati restano com'erano. `authors: null` e `abstract: null` li tolgono. " +
+          "Passando a `PUBLISHED` per la prima volta si imposta `publishedAt`; tornare a `DRAFT` ritira la pubblicazione dal pubblico ma conserva la data. " +
+          "Una modifica che lascerebbe la pubblicazione con entrambi o con nessuno tra file e indirizzo risponde 400, anche quando è senza file perché il media è stato cancellato: " +
+          "in quel caso la modifica deve indicare un nuovo `fileId` o `externalUrl`. " +
+          FILE_OR_LINK_RULES +
+          LINKED_TEXT_RULES,
+        security: bearer,
+        parameters: [{ $ref: "#/components/parameters/Id" }],
+        requestBody: {
+          required: true,
+          content: json(ref("PublicationUpdateRequest"), {
+            examples: {
+              pubblica: { summary: "Pubblica una pubblicazione", value: { status: "PUBLISHED" } },
+              autori: { summary: "Corregge autori e tipo", value: { authors: "A. Rossi", type: "RESEARCH" } },
+              daLinkAFile: {
+                summary: "Passa da un indirizzo esterno a un file",
+                value: { fileId: MEDIA_ID, externalUrl: null },
+              },
+            },
+          }),
+        },
+        responses: {
+          "200": { description: "La pubblicazione aggiornata.", content: json(ref("PublicationAdmin")) },
+          "400": errorResponse(
+            "Body non valido: nessun campo da cambiare, campo non previsto, valori vuoti o fuori limite, `fileId` inesistente o non PDF, " +
+              "file e indirizzo entrambi presenti o entrambi assenti dopo la modifica, oppure caratteri che non si possono salvare.",
+            "nothing to change",
+          ),
+          "401": response("Unauthorized"),
+          "404": response("NotFound"),
+          "413": response("PayloadTooLarge"),
+        },
+      },
+      delete: {
+        tags: ["Pubblicazioni (admin)"],
+        operationId: "deletePublication",
+        summary: "Elimina una pubblicazione",
+        description: "Elimina la pubblicazione; il PDF resta tra i media. Se due richieste la eliminano insieme, una risponde 204 e l'altra 404.",
+        security: bearer,
+        parameters: [{ $ref: "#/components/parameters/Id" }],
+        responses: {
+          "204": { description: "Pubblicazione eliminata, nessun contenuto." },
+          "401": response("Unauthorized"),
+          "404": response("NotFound"),
+        },
+      },
+    },
   },
 
   components: {
@@ -1498,6 +1904,42 @@ export const openApiSpec = {
         in: "query",
         required: false,
         description: "Solo le persone con questo stato. Un valore fuori elenco (anche vuoto) risponde 400; ripetuto, vale l'ultimo.",
+        schema: ref("ContentStatus"),
+      },
+      PublicDocumentCategoryFilter: {
+        name: "category",
+        in: "query",
+        required: true,
+        description:
+          "La categoria dei documenti da elencare: `INSTITUTIONAL` (Documenti istituzionali) o `TRANSPARENCY` (Trasparenza). Obbligatoria: assente, vuota o fuori elenco risponde 400; ripetuta, vale l'ultima.",
+        schema: ref("DocumentCategory"),
+      },
+      DocumentCategoryFilter: {
+        name: "category",
+        in: "query",
+        required: false,
+        description: "Solo i documenti di questa categoria. Un valore fuori elenco (anche vuoto) risponde 400; ripetuto, vale l'ultimo.",
+        schema: ref("DocumentCategory"),
+      },
+      DocumentStatusFilter: {
+        name: "status",
+        in: "query",
+        required: false,
+        description: "Solo i documenti con questo stato. Un valore fuori elenco (anche vuoto) risponde 400; ripetuto, vale l'ultimo.",
+        schema: ref("ContentStatus"),
+      },
+      PublicationTypeFilter: {
+        name: "type",
+        in: "query",
+        required: false,
+        description: "Solo le pubblicazioni di questo tipo. Un valore fuori elenco (anche vuoto) risponde 400; ripetuto, vale l'ultimo.",
+        schema: ref("PublicationType"),
+      },
+      PublicationStatusFilter: {
+        name: "status",
+        in: "query",
+        required: false,
+        description: "Solo le pubblicazioni con questo stato. Un valore fuori elenco (anche vuoto) risponde 400; ripetuto, vale l'ultimo.",
         schema: ref("ContentStatus"),
       },
     },
@@ -2323,6 +2765,200 @@ export const openApiSpec = {
         type: "object",
         required: ["people"],
         properties: { people: { type: "array", items: ref("PersonAdmin"), description: "Le persone." } },
+      },
+
+      DocumentCategory: {
+        type: "string",
+        enum: [...DOCUMENT_CATEGORIES],
+        // No example or default here: the schema also types the list filters, and Swagger UI would send it.
+        description: "`INSTITUTIONAL`: pagina Documenti istituzionali. `TRANSPARENCY`: pagina Trasparenza.",
+      },
+      PublicationType: {
+        type: "string",
+        enum: [...PUBLICATION_TYPES],
+        description:
+          "Tipo di pubblicazione: `RESEARCH` (Ricerca), `REPORT` (Report), `PAPER` (Paper), `PUBLICATION` (Pubblicazione), `DATA` (Dati), `ATLAS` (Atlante), " +
+          "`SCENARIO` (Scenario), `CITIZEN_SCIENCE` (Citizen science), `LIVING_ARCHIVE` (Living Archive).",
+      },
+      LinkedFile: {
+        type: "object",
+        description: "Il file PDF di un documento o di una pubblicazione, risolto dal media.",
+        required: ["id", "url", "mimeType", "alt"],
+        properties: {
+          id: { type: "string", format: "uuid", example: MEDIA_ID },
+          url: { type: "string", nullable: true, description: "Indirizzo pubblico del file.", example: DOCUMENT_URL },
+          mimeType: { type: "string", example: "application/pdf" },
+          alt: { type: "string", nullable: true, description: "Descrizione del media." },
+        },
+      },
+      PublicLink: {
+        type: "object",
+        description: "Dove porta un documento o una pubblicazione.",
+        required: ["url", "kind", "mimeType"],
+        properties: {
+          url: { type: "string", nullable: true, description: "L'indirizzo del file caricato o l'indirizzo esterno.", example: DOCUMENT_URL },
+          kind: { type: "string", enum: ["file", "external"], description: "`file`: PDF caricato. `external`: indirizzo esterno.", example: "file" },
+          mimeType: { type: "string", nullable: true, description: "Il tipo del file per `file`; `null` per `external`.", example: "application/pdf" },
+        },
+      },
+      DocumentPublic: {
+        type: "object",
+        required: ["id", "title", "section", "date", "description", "link"],
+        properties: {
+          id: { type: "string", format: "uuid", example: DOCUMENT_ID },
+          title: { type: "string", example: "Statuto della Fondazione" },
+          section: { type: "string", nullable: true, description: "La sezione dentro la pagina; `null` se manca.", example: "Statuto e regolamenti" },
+          date: { type: "string", format: "date-time", description: "Il giorno del documento (mezzanotte UTC).", example: "2026-03-01T00:00:00.000Z" },
+          description: { type: "string", nullable: true, description: "Descrizione; una riga vuota separa i paragrafi." },
+          link: ref("PublicLink"),
+        },
+      },
+      DocumentPublicList: {
+        type: "object",
+        required: ["documents"],
+        properties: { documents: { type: "array", items: ref("DocumentPublic"), description: "I documenti pubblicati della categoria, in ordine." } },
+      },
+      DocumentAdmin: {
+        type: "object",
+        required: ["id", "title", "category", "section", "date", "description", "file", "externalUrl", "status", "publishedAt", "createdAt", "updatedAt"],
+        properties: {
+          id: { type: "string", format: "uuid", example: DOCUMENT_ID },
+          title: { type: "string", example: "Statuto della Fondazione" },
+          category: ref("DocumentCategory"),
+          section: { type: "string", nullable: true, example: "Statuto e regolamenti" },
+          date: { type: "string", format: "date-time", description: "Il giorno del documento (mezzanotte UTC)." },
+          description: { type: "string", nullable: true },
+          file: nullableRef("LinkedFile", "Il file PDF, se il documento ne ha uno; altrimenti `null`."),
+          externalUrl: { type: "string", nullable: true, description: "L'indirizzo esterno, se il documento ne ha uno; altrimenti `null`." },
+          status: ref("ContentStatus"),
+          publishedAt: {
+            type: "string",
+            format: "date-time",
+            nullable: true,
+            description: "Quando il documento è stato pubblicato per la prima volta; non si azzera più.",
+          },
+          createdAt: { type: "string", format: "date-time" },
+          updatedAt: { type: "string", format: "date-time" },
+        },
+      },
+      DocumentAdminList: {
+        type: "object",
+        required: ["documents"],
+        properties: { documents: { type: "array", items: ref("DocumentAdmin"), description: "I documenti." } },
+      },
+      DocumentCreateRequest: {
+        type: "object",
+        required: ["title", "category", "date"],
+        additionalProperties: false,
+        description: "Più `fileId` oppure `externalUrl` (uno solo dei due).",
+        properties: {
+          title: { type: "string", maxLength: DOCUMENT_TITLE_MAX, description: "Titolo, su una sola riga.", example: "Statuto della Fondazione" },
+          category: ref("DocumentCategory"),
+          section: { type: "string", nullable: true, maxLength: DOCUMENT_SECTION_MAX, description: "Sezione, su una sola riga, facoltativa.", example: "Statuto e regolamenti" },
+          date: { type: "string", pattern: DATE_PATTERN, description: "Giorno del documento: `2026-03-01` (l'ora, se c'è, viene scartata).", example: "2026-03-01" },
+          description: { type: "string", nullable: true, maxLength: DOCUMENT_DESCRIPTION_MAX, description: "Descrizione facoltativa." },
+          fileId: { type: "string", format: "uuid", nullable: true, description: "Id di un media esistente di tipo PDF.", example: MEDIA_ID },
+          externalUrl: {
+            type: "string",
+            nullable: true,
+            maxLength: EXTERNAL_URL_MAX,
+            description: "Indirizzo `http` o `https` valido.",
+            example: "https://www.example.org/statuto.pdf",
+          },
+          status: { allOf: [ref("ContentStatus")], description: "Stato di pubblicazione. Se manca, un nuovo documento è `DRAFT`." },
+        },
+      },
+      DocumentUpdateRequest: {
+        type: "object",
+        description: "Almeno un campo. I campi non inviati non cambiano.",
+        minProperties: 1,
+        additionalProperties: false,
+        properties: {
+          title: { type: "string", maxLength: DOCUMENT_TITLE_MAX, description: "Titolo, su una sola riga." },
+          category: ref("DocumentCategory"),
+          section: { type: "string", nullable: true, maxLength: DOCUMENT_SECTION_MAX, description: "`null` o vuota toglie la sezione." },
+          date: { type: "string", pattern: DATE_PATTERN, description: "Giorno del documento." },
+          description: { type: "string", nullable: true, maxLength: DOCUMENT_DESCRIPTION_MAX, description: "`null` o vuota toglie la descrizione." },
+          fileId: { type: "string", format: "uuid", nullable: true, description: "Un media PDF esistente; `null` toglie il file (e allora serve `externalUrl`)." },
+          externalUrl: { type: "string", nullable: true, maxLength: EXTERNAL_URL_MAX, description: "Un indirizzo `http` o `https`; `null` lo toglie (e allora serve `fileId`)." },
+          status: ref("ContentStatus"),
+        },
+      },
+      PublicationPublic: {
+        type: "object",
+        required: ["id", "title", "type", "authors", "date", "abstract", "link"],
+        properties: {
+          id: { type: "string", format: "uuid", example: PUBLICATION_ID },
+          title: { type: "string", example: "Rapporto sullo stato dei territori costieri" },
+          type: ref("PublicationType"),
+          authors: { type: "string", nullable: true, description: "Autori, testo libero.", example: "A. Rossi, M. Bianchi" },
+          date: { type: "string", format: "date-time", description: "Il giorno della pubblicazione (mezzanotte UTC)." },
+          abstract: { type: "string", nullable: true, description: "Sintesi; una riga vuota separa i paragrafi." },
+          link: ref("PublicLink"),
+        },
+      },
+      PublicationPublicPage: pageOf("PublicationPublic", "Pagina di pubblicazioni pubblicate."),
+      PublicationAdmin: {
+        type: "object",
+        required: ["id", "title", "type", "authors", "date", "abstract", "file", "externalUrl", "status", "publishedAt", "createdAt", "updatedAt"],
+        properties: {
+          id: { type: "string", format: "uuid", example: PUBLICATION_ID },
+          title: { type: "string", example: "Rapporto sullo stato dei territori costieri" },
+          type: ref("PublicationType"),
+          authors: { type: "string", nullable: true, example: "A. Rossi, M. Bianchi" },
+          date: { type: "string", format: "date-time", description: "Il giorno della pubblicazione (mezzanotte UTC)." },
+          abstract: { type: "string", nullable: true },
+          file: nullableRef("LinkedFile", "Il file PDF, se la pubblicazione ne ha uno; altrimenti `null`."),
+          externalUrl: { type: "string", nullable: true, description: "L'indirizzo esterno, se la pubblicazione ne ha uno; altrimenti `null`." },
+          status: ref("ContentStatus"),
+          publishedAt: {
+            type: "string",
+            format: "date-time",
+            nullable: true,
+            description: "Quando la pubblicazione è stata pubblicata per la prima volta; non si azzera più.",
+          },
+          createdAt: { type: "string", format: "date-time" },
+          updatedAt: { type: "string", format: "date-time" },
+        },
+      },
+      PublicationAdminPage: pageOf("PublicationAdmin", "Pagina di pubblicazioni."),
+      PublicationCreateRequest: {
+        type: "object",
+        required: ["title", "type", "date"],
+        additionalProperties: false,
+        description: "Più `fileId` oppure `externalUrl` (uno solo dei due).",
+        properties: {
+          title: { type: "string", maxLength: PUBLICATION_TITLE_MAX, description: "Titolo, su una sola riga.", example: "Rapporto sullo stato dei territori costieri" },
+          type: ref("PublicationType"),
+          authors: { type: "string", nullable: true, maxLength: PUBLICATION_AUTHORS_MAX, description: "Autori, testo libero su una sola riga, facoltativo.", example: "A. Rossi, M. Bianchi" },
+          date: { type: "string", pattern: DATE_PATTERN, description: "Giorno della pubblicazione: `2026-06-15` (l'ora, se c'è, viene scartata).", example: "2026-06-15" },
+          abstract: { type: "string", nullable: true, maxLength: PUBLICATION_ABSTRACT_MAX, description: "Sintesi facoltativa." },
+          fileId: { type: "string", format: "uuid", nullable: true, description: "Id di un media esistente di tipo PDF.", example: MEDIA_ID },
+          externalUrl: {
+            type: "string",
+            nullable: true,
+            maxLength: EXTERNAL_URL_MAX,
+            description: "Indirizzo `http` o `https` valido.",
+            example: "https://www.example.org/rapporto-territori.pdf",
+          },
+          status: { allOf: [ref("ContentStatus")], description: "Stato di pubblicazione. Se manca, una nuova pubblicazione è `DRAFT`." },
+        },
+      },
+      PublicationUpdateRequest: {
+        type: "object",
+        description: "Almeno un campo. I campi non inviati non cambiano.",
+        minProperties: 1,
+        additionalProperties: false,
+        properties: {
+          title: { type: "string", maxLength: PUBLICATION_TITLE_MAX, description: "Titolo, su una sola riga." },
+          type: ref("PublicationType"),
+          authors: { type: "string", nullable: true, maxLength: PUBLICATION_AUTHORS_MAX, description: "`null` o vuoto toglie gli autori." },
+          date: { type: "string", pattern: DATE_PATTERN, description: "Giorno della pubblicazione." },
+          abstract: { type: "string", nullable: true, maxLength: PUBLICATION_ABSTRACT_MAX, description: "`null` o vuota toglie la sintesi." },
+          fileId: { type: "string", format: "uuid", nullable: true, description: "Un media PDF esistente; `null` toglie il file (e allora serve `externalUrl`)." },
+          externalUrl: { type: "string", nullable: true, maxLength: EXTERNAL_URL_MAX, description: "Un indirizzo `http` o `https`; `null` lo toglie (e allora serve `fileId`)." },
+          status: ref("ContentStatus"),
+        },
       },
     },
   },

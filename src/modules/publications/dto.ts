@@ -1,4 +1,4 @@
-import type { FileRef, LinkPublic } from "../../lib/fileLink";
+import type { FileRef, LinkPublic } from "../../lib/fileLinkTypes";
 import type { ContentStatusValue } from "../organs/dto";
 
 export const PUBLICATION_TYPES = [
@@ -13,6 +13,10 @@ export const PUBLICATION_TYPES = [
   "LIVING_ARCHIVE",
 ] as const;
 export type PublicationTypeValue = (typeof PUBLICATION_TYPES)[number];
+
+export const PUBLICATION_TITLE_MAX = 200;
+export const PUBLICATION_AUTHORS_MAX = 300;
+export const PUBLICATION_ABSTRACT_MAX = 3000;
 
 /** `abstract` is plain text: a blank line separates paragraphs. `date` is a day (midnight UTC). */
 export type PublicationPublic = {

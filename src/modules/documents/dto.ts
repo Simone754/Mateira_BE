@@ -1,8 +1,12 @@
-import type { FileRef, LinkPublic } from "../../lib/fileLink";
+import type { FileRef, LinkPublic } from "../../lib/fileLinkTypes";
 import type { ContentStatusValue } from "../organs/dto";
 
 export const DOCUMENT_CATEGORIES = ["INSTITUTIONAL", "TRANSPARENCY"] as const;
 export type DocumentCategoryValue = (typeof DOCUMENT_CATEGORIES)[number];
+
+export const DOCUMENT_TITLE_MAX = 200;
+export const DOCUMENT_SECTION_MAX = 120;
+export const DOCUMENT_DESCRIPTION_MAX = 1000;
 
 /** `description` is plain text: a blank line separates paragraphs. `date` is a day (midnight UTC). */
 export type DocumentPublic = {
